@@ -355,6 +355,13 @@ def kb_start_diag_form() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Начать диагностику", callback_data="start_diag_form")],
     ])
 
+def kb_persistent_main() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🔙 Главное меню")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
 def kb_diag_pay() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Записаться на диагностику", url="https://monecle.com/buy/95078")],

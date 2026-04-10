@@ -14,6 +14,9 @@ from content import (
     RAZBOR_REMIND_1H, RAZBOR_REMIND_24H,
     VIP_REMIND_1H, VIP_REMIND_24H,
     PAYMENT_SUCCESS_COURSE, PAYMENT_SUCCESS_RAZBOR, PAYMENT_SUCCESS_VIP,
+    DIAG_REMIND_1H, DIAG_REMIND_24H,
+    DIAG_PAID_SUCCESS,
+    RAZBOR_PAID_MSG_1, RAZBOR_PAID_MSG_2, RAZBOR_PAID_MSG_3,
 )
 from keyboards import (
     kb_warmup_day1, kb_warmup_day2, kb_warmup_day3,
@@ -22,7 +25,8 @@ from keyboards import (
     kb_webinar_register, kb_webinar_join,
     kb_post_webinar, kb_pay, kb_payment_success,
     kb_razbor_personal_pay, kb_after_razbor_paid,
-    kb_vip_buy, kb_start_razbor_form, kb_start_diag_form
+    kb_vip_buy, kb_start_razbor_form, kb_start_diag_form,
+    kb_diag_pay,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,7 +167,7 @@ async def job_daily_warmup(bot: Bot, is_test: bool = False):
                 try:
                     await bot.send_video(
                         chat_id=tg_id, video=content["video"],
-                        caption="Видео к сегодняшнему материалу 👇"
+                        caption="🎬 Видео к сегодняшнему материалу 👇"
                     )
                 except Exception:
                     pass
@@ -348,10 +352,10 @@ async def job_webinar_reminders(bot: Bot, is_test: bool = False):
         c15m  = 30 <= sec_left < 60
         deact = sec_left <= -30
     else:
-        c1d   = 82800 <= sec_left <= 90000 
-        c2h   = 5400 <= sec_left <= 9000   
-        c15m  = 0 < sec_left <= 1800       
-        deact = sec_left <= -3600         
+        c1d   = 82800 <= sec_left <= 90000
+        c2h   = 5400 <= sec_left <= 9000
+        c15m  = 0 < sec_left <= 1800
+        deact = sec_left <= -3600
 
     all_users = [u for u in db.get_all_users() if not u["is_paid"]]
     if not all_users:
@@ -385,20 +389,23 @@ async def job_webinar_reminders(bot: Bot, is_test: bool = False):
         db.deactivate_webinar()
 
 
+# ══════════════════════════════════════════════════════════════
+#  JOB 7 — ДОЖИМ ДИАГНОСТИКИ ПРЕДНАЗНАЧЕНИЯ
+# ══════════════════════════════════════════════════════════════
 async def job_diag_reminders(bot: Bot, is_test: bool = False):
     """Дожим для диагностики предназначения (9900₽)"""
     users = db.get_diag_reminders()
     now = datetime.now()
-    
+
     for user in users:
         tg_id = user["tg_id"]
         click_str = user["diag_click_time"]
         sent_1h = bool(user["diag_remind_1h_sent"])
         sent_24h = bool(user["diag_remind_24h_sent"])
-        
+
         if not click_str:
             continue
-            
+
         try:
             click_dt = datetime.strptime(click_str, "%Y-%m-%d %H:%M:%S")
             if is_test:
@@ -409,38 +416,21 @@ async def job_diag_reminders(bot: Bot, is_test: bool = False):
                 val = (now - click_dt).total_seconds() / 3600
                 c1h = 1.0 <= val < 1.5
                 c24h = 24.0 <= val < 24.5
-            
-            from keyboards import kb_diag_pay
-            
+
             if not sent_1h and c1h:
-                text = (
-                    "Ты не просто так сюда попал.\n\n"
-                    "Сейчас у тебя есть шанс понять себя. ⏳\n\n"
-                    "Диагностика предназначения — это:\n"
-                    "— честный взгляд на твою ситуацию\n"
-                    "— где ты сейчас и куда идёшь\n"
-                    "— как выйти на деньги и реализацию\n\n"
-                    "Стоимость — 9900 ₽"
-                )
-                if await safe_send(bot, tg_id, text, kb_diag_pay()):
+                if await safe_send(bot, tg_id, DIAG_REMIND_1H, kb_diag_pay()):
                     db.set_diag_remind_sent(tg_id, "1h")
-                    
+
             elif not sent_24h and c24h:
-                text = (
-                    "Проблема не в деньгах.\n\n"
-                    "Проблема в том, что человек живёт не своим.\n"
-                    "Я могу это показать. 👇\n\n"
-                    "Диагностика предназначения — 9900 ₽"
-                )
-                if await safe_send(bot, tg_id, text, kb_diag_pay()):
+                if await safe_send(bot, tg_id, DIAG_REMIND_24H, kb_diag_pay()):
                     db.set_diag_remind_sent(tg_id, "24h")
-                    
+
         except Exception as e:
             logger.error(f"[diag_reminders] user {tg_id}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
-#  JOB 7 — ПРОВЕРКА ОПЛАТ ЧЕРЕЗ MONECLE API
+#  JOB 8 — ПРОВЕРКА ОПЛАТ ЧЕРЕЗ MONECLE API
 # ══════════════════════════════════════════════════════════════
 _KNOWN_PAID_ORDERS: set = set()
 
@@ -483,29 +473,28 @@ async def job_check_payments(bot: Bot):
             intent = user["last_buy_intent"] or "course"
             product = order.get("product_name", "").lower()
 
-            is_diag = ("предназначени" in product) or (int(amount) == 9900)
+            is_diag   = ("предназначени" in product) or (int(amount) == 9900)
             is_razbor = ("разбор" in product) or (int(amount) == 3000)
-            is_vip = ("vip" in product) or (int(amount) > 10000)
+            is_vip    = ("vip" in product) or (int(amount) > 10000)
 
             _KNOWN_PAID_ORDERS.add(order_id)
-
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             if is_diag and not user.get("diag_paid"):
                 db.mark_diag_paid(tg_id)
                 try:
-                    from keyboards import kb_start_diag_form
                     await bot.send_message(
-                        tg_id, 
-                        "🎉 Оплата получена! Чтобы я мог составить результат, заполните анкету 👇", 
-                        reply_markup=kb_start_diag_form()
+                        tg_id,
+                        DIAG_PAID_SUCCESS,
+                        reply_markup=kb_start_diag_form(),
+                        parse_mode="HTML"
                     )
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
                     await bot.send_message(
                         ADMIN_GROUP_ID,
-                        f"🧬 <b>Оплачена Диагностика!</b>\nПользователь: {uname}\nСумма: {amount} ₽\nУслуга: Диагностика предназначения",
+                        f"🧬 <b>Оплачена Диагностика!</b>\nПользователь: {uname}\nСумма: {amount} ₽",
                         reply_markup=kb_ls, parse_mode="HTML"
                     )
                 except Exception:
@@ -514,18 +503,17 @@ async def job_check_payments(bot: Bot):
             elif is_razbor and not user["razbor_paid"]:
                 db.mark_razbor_paid(tg_id)
                 try:
-                    from keyboards import kb_start_razbor_form
-                    await bot.send_message(
-                        tg_id, 
-                        "🎉 Оплата получена! Заполните короткую анкету перед разбором 👇", 
-                        reply_markup=kb_start_razbor_form()
-                    )
+                    await bot.send_message(tg_id, RAZBOR_PAID_MSG_1, parse_mode="HTML")
+                    await asyncio.sleep(1)
+                    await bot.send_message(tg_id, RAZBOR_PAID_MSG_2, parse_mode="HTML")
+                    await asyncio.sleep(1)
+                    await bot.send_message(tg_id, RAZBOR_PAID_MSG_3, parse_mode="HTML")
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
                     await bot.send_message(
                         ADMIN_GROUP_ID,
-                        f"💎 <b>Оплачен разбор!</b>\nПользователь: {uname}\nСумма: {amount} ₽\nУслуга: Персональный разбор (3000)",
+                        f"💎 <b>Оплачен разбор!</b>\nПользователь: {uname}\nСумма: {amount} ₽",
                         reply_markup=kb_ls, parse_mode="HTML"
                     )
                 except Exception:
@@ -533,14 +521,17 @@ async def job_check_payments(bot: Bot):
 
             elif is_vip and not user["vip_paid"]:
                 with db.get_conn() as conn:
-                    conn.execute('UPDATE users SET vip_paid=1, paid_date=? WHERE tg_id=?', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), tg_id))
+                    conn.execute(
+                        'UPDATE users SET vip_paid=1, paid_date=? WHERE tg_id=?',
+                        (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), tg_id)
+                    )
                 try:
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
                     await bot.send_message(
-                        ADMIN_GROUP_ID, 
-                        f"🏆 <b>Оплачен VIP!</b>\nПользователь: {uname}\nСумма: {amount} ₽\nУслуга: VIP-сопровождение",
+                        ADMIN_GROUP_ID,
+                        f"🏆 <b>Оплачен VIP!</b>\nПользователь: {uname}\nСумма: {amount} ₽",
                         reply_markup=kb_ls, parse_mode="HTML"
                     )
                     await bot.send_message(tg_id, PAYMENT_SUCCESS_VIP, parse_mode="HTML")
@@ -549,9 +540,12 @@ async def job_check_payments(bot: Bot):
 
             elif not user["is_paid"]:
                 db.mark_paid(tg_id)
-                product_label = "🎓 Курс ОстеоФейс ПРО" if "pro" in intent or "pro" in product else "🎓 Курс ОстеоФейс"
+                product_label = (
+                    "🎓 Курс ОстеоФейс ПРО"
+                    if "pro" in intent or "pro" in product
+                    else "🎓 Курс ОстеоФейс"
+                )
                 try:
-                    from keyboards import kb_payment_success
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
@@ -560,7 +554,11 @@ async def job_check_payments(bot: Bot):
                         f"🎉 <b>Новая оплата курса!</b>\nПользователь: {uname}\nСумма: {amount} ₽\nУслуга: {product_label}",
                         reply_markup=kb_ls, parse_mode="HTML"
                     )
-                    await bot.send_message(tg_id, PAYMENT_SUCCESS_COURSE, reply_markup=kb_payment_success(), parse_mode="HTML")
+                    from keyboards import kb_payment_success
+                    await bot.send_message(
+                        tg_id, PAYMENT_SUCCESS_COURSE,
+                        reply_markup=kb_payment_success(), parse_mode="HTML"
+                    )
                 except Exception:
                     pass
 

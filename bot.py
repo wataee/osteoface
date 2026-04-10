@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 from datetime import datetime
-
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart, CommandObject, Command, StateFilter
@@ -22,10 +22,19 @@ from config import (
 )
 import database as db
 from content import (
-    WELCOME, DAY0, RAZBOR_REQUEST, RAZBOR_ALREADY_SENT, RAZBOR_RECEIVED,
+    WELCOME, ACTION_SELECT,
+    DAY0, VIDEO_CAPTIONS,
+    RAZBOR_REQUEST, RAZBOR_ALREADY_SENT, RAZBOR_RECEIVED,
+    RAZBOR_PHOTO_REPLY_1, RAZBOR_PHOTO_REPLY_2, RAZBOR_PHOTO_REPLY_3,
+    RAZBOR_FOLLOWUP_1, RAZBOR_FOLLOWUP_2,
+    RAZBOR_ABANDONED_CART, RAZBOR_PAY_LINK_READY,
+    HOCHU_REPLY_1, HOCHU_REPLY_2, DOUBT_UPSELL,
     WEBINAR_REGISTERED_OK, WEBINAR_NOT_ACTIVE,
-    COURSES_INFO, VIP_DESCRIPTION, VIP_UPSELL_AFTER_RAZBOR,
+    COURSES_INFO, COURSE_LANDING_INFO, VIP_DESCRIPTION, VIP_UPSELL_AFTER_RAZBOR,
+    VIP_ACCESS_READY, PHONE_REQUEST, COURSE_ACCESS_READY,
+    CONTACT_SAVED, CONTACT_PLACE_RESERVED,
     PAYMENT_SUCCESS_COURSE, PAYMENT_SUCCESS_RAZBOR, PAYMENT_SUCCESS_VIP,
+    DIAG_INFO, DIAG_UPSELL_AFTER,
     WARMUP,
 )
 from keyboards import (
@@ -38,9 +47,11 @@ from keyboards import (
     kb_cancel_webinar_confirm, kb_after_razbor_paid,
     kb_razbor_personal_pay,
     kb_users_list, kb_user_back,
-    kb_funnel_branch_menu, kb_funnel_day_menu, kb_funnel_skip_media, kb_webinar_link, kb_start_razbor_form, kb_start_diag_form, 
-    kb_diag_pay, kb_admin_diag_reply
+    kb_funnel_branch_menu, kb_funnel_day_menu, kb_funnel_skip_media, kb_webinar_link,
+    kb_start_razbor_form, kb_start_diag_form,
+    kb_diag_pay, kb_admin_diag_reply, kb_persistent_main,
 )
+
 from scheduler import (
     job_daily_warmup, job_daily_post_webinar,
     job_buy_reminders, job_razbor_reminders, job_vip_reminders,
@@ -50,8 +61,8 @@ from scheduler import (
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
-
 bot = Bot(token=BOT_TOKEN)
+
 dp  = Dispatcher()
 router = Router()
 
@@ -136,7 +147,7 @@ def setup_scheduler():
         scheduler.add_job(job_buy_reminders,      "interval", seconds=10, args=[bot, True])
         scheduler.add_job(job_razbor_reminders,   "interval", seconds=10, args=[bot, True])
         scheduler.add_job(job_vip_reminders,      "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_diag_reminders,     "interval", seconds=10, args=[bot, True])  # <-- ДОБАВИТЬ
+        scheduler.add_job(job_diag_reminders,     "interval", seconds=10, args=[bot, True])
         scheduler.add_job(job_check_payments,     "interval", seconds=10, args=[bot])
         logger.info("Scheduler: TEST MODE")
     else:
@@ -146,18 +157,36 @@ def setup_scheduler():
         scheduler.add_job(job_buy_reminders,      "interval", minutes=30, args=[bot, False])
         scheduler.add_job(job_razbor_reminders,   "interval", minutes=30, args=[bot, False])
         scheduler.add_job(job_vip_reminders,      "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_diag_reminders,     "interval", minutes=30, args=[bot, False])  # <-- ДОБАВИТЬ
+        scheduler.add_job(job_diag_reminders,     "interval", minutes=30, args=[bot, False])
         scheduler.add_job(job_check_payments,     "interval", minutes=2,  args=[bot])
         logger.info("Scheduler: PRODUCTION MODE")
 
 
+# ══════════════════════════════════════════════════════════════
+#  /cleardb — очистка БД + переотправка закрепа
+# ══════════════════════════════════════════════════════════════
 @router.message(Command("cleardb"))
 async def cmd_cleardb(message: Message, state: FSMContext):
     if not is_admin(message.chat.id, message.from_user.id):
         return
+    # Снять закреп и удалить старую панель ДО очистки БД
+    try:
+        await bot.unpin_all_chat_messages(chat_id=ADMIN_GROUP_ID)
+    except Exception:
+        pass
+    old_msg_id = db.get_admin_msg_id()
+    if old_msg_id:
+        try:
+            await bot.delete_message(ADMIN_GROUP_ID, old_msg_id)
+        except Exception:
+            pass
+    # Очистить БД
     db.clear_all_data()
     await state.clear()
     await message.answer("✅ База данных полностью очищена.")
+    # Переотправить и закрепить панель администратора
+    await _pin_admin_panel()
+
 
 # ══════════════════════════════════════════════════════════════
 #  ДЕНЬ 0 — отправка приветствия ветки
@@ -168,20 +197,17 @@ async def send_day0(target: Message, tag: str):
     text     = data.get("text", "") if isinstance(data, dict) else str(data)
 
     if video_id:
-        captions = {
-            "отёки":    "Посмотрите это видео — важно для понимания причин 👆",
-            "подтяжка": "Видео о том, почему ткани теряют опору и как это исправить 👆",
-        }
+        caption = VIDEO_CAPTIONS.get(tag, "")
         try:
             await bot.send_video(
                 chat_id=target.chat.id, video=video_id,
-                caption=captions.get(tag, "")
+                caption=caption
             )
             await asyncio.sleep(2)
         except Exception as e:
             logger.error(f"Day0 video: {e}")
 
-    await target.answer(text, reply_markup=kb_day0_info(tag))
+    await target.answer(text, reply_markup=kb_day0_info(tag), parse_mode="HTML")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -202,6 +228,8 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
             pass
         return
 
+    await message.answer(ACTION_SELECT, reply_markup=kb_persistent_main())
+
     args  = command.args or ""
     tg_id = user.id
 
@@ -211,6 +239,15 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext)
         await send_day0(message, tag)
     else:
         await message.answer(WELCOME, reply_markup=kb_main_menu())
+
+
+# ─── Главное меню (reply-кнопка) ─────────────────────────────
+@router.message(F.text == "🔙 Главное меню")
+@router.message(F.text.lower().in_({"старт", "начать", "start"}))
+async def handle_main_menu_btn(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(ACTION_SELECT, reply_markup=kb_persistent_main())
+    await message.answer(WELCOME, reply_markup=kb_main_menu())
 
 
 # ─── Выбор ветки ─────────────────────────────────────────────
@@ -230,16 +267,8 @@ async def cb_tag_select(callback: CallbackQuery):
 # ─── Информация о курсах ─────────────────────────────────────
 @router.callback_query(F.data == "course_landing_info")
 async def cb_course_landing_info(callback: CallbackQuery):
-    text = (
-        "🌸 <b>Курс ОстеоФейс</b>\n\n"
-        "Система естественного омоложения и восстановления лица без уколов и операций.\n\n"
-        "На курсе вы узнаете как:\n"
-        "✅ Снимать отеки и восстанавливать лимфоток\n"
-        "✅ Подтягивать овал лица и убирать брыли\n"
-        "✅ Работать с фасциями и мышцами для стойкого результата\n\n"
-        "Узнайте все подробности и программу на нашем сайте 👇"
-    )
-    await callback.message.answer(text, reply_markup=kb_course_landing(), parse_mode="HTML")
+    await callback.message.answer(COURSE_LANDING_INFO,
+                                  reply_markup=kb_course_landing(), parse_mode="HTML")
     await callback.answer()
 
 
@@ -276,13 +305,10 @@ async def cb_buy_vip(callback: CallbackQuery, state: FSMContext):
             InlineKeyboardButton(text="💎 Занять место в VIP",
                                  url=f"{PAY_URL_VIP}?tg_id={tg_id}")
         ]])
-        await callback.message.answer("Доступ к VIP-сопровождению сформирован. Жду вас внутри 👇", reply_markup=kb)
+        await callback.message.answer(VIP_ACCESS_READY, reply_markup=kb)
     else:
         await state.update_data(course_type="vip")
-        await callback.message.answer(
-            "Чтобы закрепить за вами место, оставьте номер телефона 👇",
-            reply_markup=kb_request_phone()
-        )
+        await callback.message.answer(PHONE_REQUEST, reply_markup=kb_request_phone())
     await callback.answer()
 
 
@@ -305,13 +331,10 @@ async def cb_buy_request(callback: CallbackQuery, state: FSMContext):
                 InlineKeyboardButton(text="💎 Присоединиться",
                                      url=f"{PAY_URL}?tg_id={tg_id}")
             ]])
-        await callback.message.answer("Доступ готов. Сделайте шаг к изменениям прямо сейчас 👇", reply_markup=kb)
+        await callback.message.answer(COURSE_ACCESS_READY, reply_markup=kb)
     else:
         await state.update_data(course_type=course_type)
-        await callback.message.answer(
-            "Чтобы закрепить за вами место, оставьте номер телефона 👇",
-            reply_markup=kb_request_phone()
-        )
+        await callback.message.answer(PHONE_REQUEST, reply_markup=kb_request_phone())
     await callback.answer()
 
 
@@ -332,10 +355,13 @@ async def handle_contact(message: Message, state: FSMContext):
         btn_text = "💎 Занять место в VIP"
     elif course_type == "self":
         url = f"{PAY_URL_SELF}?tg_id={tg_id}"
-        btn_text = "💎 Присоединиться к ОстеоФейс"
+        btn_text = "🌸 Присоединиться к ОстеоФейс"
     elif course_type == "pro":
         url = f"{PAY_URL_PRO}?tg_id={tg_id}"
-        btn_text = "💎 Присоединиться к ОстеоФейс ПРО"
+        btn_text = "🎓 Присоединиться к ОстеоФейс ПРО"
+    elif course_type == "razbor":
+        url = f"{PAY_URL_RAZBOR}?tg_id={tg_id}"
+        btn_text = "💎 Оплатить разбор — 3 000 ₽"
     else:
         url = f"{PAY_URL}?tg_id={tg_id}"
         btn_text = "💎 Присоединиться"
@@ -343,8 +369,8 @@ async def handle_contact(message: Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text=btn_text, url=url)
     ]])
-    await message.answer("✅ Контакт сохранён!", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Ваше место закреплено. Оформить участие можно по кнопке ниже 👇", reply_markup=kb)
+    await message.answer(CONTACT_SAVED, reply_markup=kb_persistent_main())
+    await message.answer(CONTACT_PLACE_RESERVED, reply_markup=kb)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -354,21 +380,23 @@ async def handle_contact(message: Message, state: FSMContext):
 async def cb_razbor(callback: CallbackQuery, state: FSMContext):
     user = callback.from_user
     u = db.get_user(user.id)
-    
+
     if u and u["razbor_auto_replied"]:
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="💎 Записаться на индивидуальный разбор", callback_data="buy_razbor_personal")
+            InlineKeyboardButton(text="💎 Записаться на индивидуальный разбор",
+                                 callback_data="buy_razbor_personal")
         ]])
         await callback.message.answer(
-            "Вы уже получали базовый разбор.\nЕсли нужен точный протокол — закажите индивидуальный разбор 👇",
+            "🙌 Вы уже получали базовый разбор.\n\n"
+            "Если нужен точный протокол — закажите индивидуальный разбор 👇",
             reply_markup=kb
         )
         return await callback.answer()
-    
+
     if u and u["razbor_photo_sent"]:
         await callback.message.answer(RAZBOR_ALREADY_SENT, reply_markup=kb_channel())
         return await callback.answer()
-    
+
     await callback.message.answer(RAZBOR_REQUEST)
     await state.set_state(RazborState.waiting_for_photo)
     await callback.answer()
@@ -376,60 +404,44 @@ async def cb_razbor(callback: CallbackQuery, state: FSMContext):
 
 @router.message(RazborState.waiting_for_photo)
 async def receive_razbor_photo(message: Message, state: FSMContext):
-    user = message.from_user
-    if not user:
-        return
+    tg_id = message.from_user.id
     if not message.photo:
         await message.answer("⚠️ Это не фото! Пожалуйста, пришлите фотографию лица.")
         return
-
-    tg_id = user.id
-    db.upsert_user(tg_id, "разбор", user.username, user.full_name)
+    db.upsert_user(tg_id, "разбор", message.from_user.username, message.from_user.full_name)
     db.mark_razbor_photo_sent(tg_id)
-
-    await message.answer(RAZBOR_RECEIVED)
     await state.clear()
 
-    # Задержка 1: от отправки фото до сообщения "Я посмотрел..."
-    # В тесте: 10 секунд. В бою: случайное время от 15 до 45 минут (900-2700 сек)
-    delay = 10 if TEST_MODE else random.randint(900, 2700)
-    asyncio.create_task(_auto_razbor_reply(tg_id, delay))
+    await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_1)
+    await asyncio.sleep(1)
+    await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_2)
+    await asyncio.sleep(1)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💎 Персональный разбор — 3 000 ₽",
+                             callback_data="buy_razbor_personal")
+    ]])
+    await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_3, reply_markup=kb)
+    db.mark_razbor_auto_replied(tg_id)
+    asyncio.create_task(_fast_followup_razbor(tg_id))
 
 
-async def _auto_razbor_reply(tg_id: int, delay_seconds: int):
-    await asyncio.sleep(delay_seconds)
-
-    user = db.get_user(tg_id)
-    if not user or user["razbor_auto_replied"]:
-        return
-
-    template = db.get_setting("razbor_template")
-    kb_razbor_offer = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, хочу разбор за 3000 ₽", callback_data="buy_razbor_personal")],
-        [InlineKeyboardButton(text="⏸ Пока нет", callback_data="noop")]
-    ])
-    try:
-        await bot.send_message(tg_id, template, reply_markup=kb_razbor_offer)
-        db.mark_razbor_auto_replied(tg_id)
-
-        # Задержка 2: от "Я посмотрел..." до предложения "Диагностики предназначения"
-        # В тесте: 15 секунд. В бою: случайное время от 5 до 15 минут (300-900 сек)
-        diag_delay = 15 if TEST_MODE else random.randint(300, 900)
-        await asyncio.sleep(diag_delay)
-        
-        kb_diag = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Да, хочу узнать", callback_data="diag_yes")],
-            [InlineKeyboardButton(text="⏸ Нет, спасибо", callback_data="noop")]
-        ])
-        await bot.send_message(
-            tg_id, 
-            "Кстати 💡\n\nЯ вижу не только лицо, но и глубже — состояние человека.\n"
-            "Иногда причина внешних проблем — не на своём месте в жизни.\n\n"
-            "Хочешь, разберу твоё предназначение?", 
-            reply_markup=kb_diag
-        )
-    except Exception as e:
-        logger.warning(f"[auto_razbor] user {tg_id}: {e}")
+async def _fast_followup_razbor(tg_id: int):
+    delay1 = 10 if TEST_MODE else 120
+    delay2 = 10 if TEST_MODE else 180
+    await asyncio.sleep(delay1)
+    u = db.get_user(tg_id)
+    if u and not u["razbor_pay_clicked"] and not u["razbor_paid"]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🔍 Разобрать моё лицо", callback_data="buy_razbor_personal")
+        ]])
+        await bot.send_message(tg_id, RAZBOR_FOLLOWUP_1, reply_markup=kb)
+    await asyncio.sleep(delay2)
+    u = db.get_user(tg_id)
+    if u and not u["razbor_pay_clicked"] and not u["razbor_paid"]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🎯 Получить разбор", callback_data="buy_razbor_personal")
+        ]])
+        await bot.send_message(tg_id, RAZBOR_FOLLOWUP_2, reply_markup=kb)
 
 
 # ─── Клик «Персональный разбор» ──────────────────────────────
@@ -438,21 +450,47 @@ async def cb_buy_razbor_personal(callback: CallbackQuery, state: FSMContext):
     tg_id = callback.from_user.id
     db.mark_razbor_pay_clicked(tg_id)
     db.set_last_buy_intent(tg_id, "razbor")
-
-    user = db.get_user(tg_id)
-    if user and user["phone"]:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="💎 Заказать персональный разбор",
-                                 url=f"{PAY_URL_RAZBOR}?tg_id={tg_id}")
-        ]])
-        await callback.message.answer("Заявка сформирована. Как только всё будет готово, я приступлю к разбору 👇", reply_markup=kb)
-    else:
-        await state.update_data(course_type="razbor")
-        await callback.message.answer(
-            "Чтобы оформить заказ, оставьте номер телефона 👇",
-            reply_markup=kb_request_phone()
-        )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💎 Оплатить — 3 000 ₽",
+                             url=f"{PAY_URL_RAZBOR}?tg_id={tg_id}")
+    ]])
+    await callback.message.answer(RAZBOR_PAY_LINK_READY, reply_markup=kb)
     await callback.answer()
+    asyncio.create_task(_abandoned_cart_razbor(tg_id))
+
+
+async def _abandoned_cart_razbor(tg_id: int):
+    delay = 10 if TEST_MODE else 900
+    await asyncio.sleep(delay)
+    u = db.get_user(tg_id)
+    if u and u["razbor_pay_clicked"] and not u["razbor_paid"]:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="💬 Задать вопрос", callback_data="ask_question")
+        ]])
+        await bot.send_message(tg_id, RAZBOR_ABANDONED_CART, reply_markup=kb)
+
+
+@router.message(F.text.lower() == "хочу")
+async def handle_hochu(message: Message):
+    tg_id = message.from_user.id
+    u = db.get_user(tg_id)
+    if u and u["razbor_paid"]:
+        await message.answer(HOCHU_REPLY_1)
+        await asyncio.sleep(1)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="💳 Оформить рассрочку / Купить курс",
+                                 url=f"{PAY_URL_SELF}?tg_id={tg_id}")
+        ]])
+        await message.answer(HOCHU_REPLY_2, reply_markup=kb)
+        asyncio.create_task(_doubt_upsell(tg_id))
+
+
+async def _doubt_upsell(tg_id: int):
+    delay = 10 if TEST_MODE else 1800
+    await asyncio.sleep(delay)
+    u = db.get_user(tg_id)
+    if u and not u["is_paid"]:
+        await bot.send_message(tg_id, DOUBT_UPSELL)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -494,12 +532,12 @@ async def cb_webinar_register(callback: CallbackQuery):
         await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=kb_channel())
         await callback.answer()
         return
-    
+
     u = db.get_user(callback.from_user.id)
     if u and u["webinar_registered"]:
         await callback.answer("✅ Вы уже зарегистрированы!", show_alert=True)
         return
-        
+
     db.mark_webinar_registered(callback.from_user.id)
     await callback.message.answer(WEBINAR_REGISTERED_OK)
     await callback.answer("✅ Зарегистрировано!")
@@ -581,7 +619,7 @@ async def cb_toggle_test(callback: CallbackQuery):
     TEST_MODE = not TEST_MODE
     setup_scheduler()
     await callback.message.edit_reply_markup(reply_markup=kb_admin_menu(TEST_MODE))
-    await callback.answer(f"Режим: {'ТЕСТ' if TEST_MODE else 'БОЕВОЙ'}", show_alert=True)
+    await callback.answer(f"Режим: {'🔴 ТЕСТ' if TEST_MODE else '🟢 БОЕВОЙ'}", show_alert=True)
 
 
 # ─── Статистика ──────────────────────────────────────────────
@@ -607,7 +645,6 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.answer()
 
 
-
 # ──────────────────────────────────────────────────────────────
 #  УПРАВЛЕНИЕ ВЕБИНАРАМИ
 # ──────────────────────────────────────────────────────────────
@@ -615,12 +652,13 @@ async def cb_admin_stats(callback: CallbackQuery):
 async def admin_webinar_link(message: Message, state: FSMContext):
     link = message.text.strip()
     data = await state.get_data()
-    
+
     db.set_webinar(data["webinar_date"], link)
-    db.reset_webinar_registrations() 
-    
+    db.reset_webinar_registrations()
+
     await state.clear()
     await message.answer("✅ Вебинар установлен!")
+
 
 @router.callback_query(F.data == "admin:webinar_menu")
 async def cb_webinar_menu(callback: CallbackQuery):
@@ -715,7 +753,7 @@ async def webinar_setup_datetime(message: Message, state: FSMContext):
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Сохранить и разослать", callback_data="webinar_setup:confirm"),
-        InlineKeyboardButton(text="❌ Отмена",    callback_data="webinar_setup:cancel"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="webinar_setup:cancel"),
     ]])
     await message.answer(
         f"📋 <b>Подтверждение:</b>\n\n"
@@ -790,31 +828,44 @@ async def cb_cancel_webinar_confirm(callback: CallbackQuery):
         pass
     await callback.answer("✅ Вебинар отменён!", show_alert=True)
 
-@router.callback_query(F.data == "diag_yes")
-async def cb_diag_yes(callback: CallbackQuery):
-    db.mark_diag_clicked(callback.from_user.id)
-    text = (
-        "Наше тело и лицо всегда отражают то, что происходит внутри. "
-        "И часто главная причина застоя в жизни — это попытка идти чужим путем.\n\n"
-        "Это не авто-тест из интернета. Это глубокая индивидуальная диагностика твоего предназначения.\n"
-        "Я покажу тебе:\n"
-        "🔹 Твои истинные таланты, которые сейчас спят.\n"
-        "🔹 Ключевые ошибки, которые блокируют твой успех.\n"
-        "🔹 Куда двигаться, чтобы реализовываться в кайф, а не через выгорание.\n"
-        "🔹 Как монетизировать свой потенциал и легко выйти на новый уровень дохода.\n\n"
-        "Я запишу для тебя детальное личное видео. "
-        "Это будет твой персональный навигатор, который поможет расставить всё на свои места.\n\n"
-        "Стоимость — 9 900 ₽"
-    )
-    await callback.message.answer(text, reply_markup=kb_diag_pay())
+
+@router.callback_query(F.data == "cancel_webinar_abort")
+async def cb_cancel_webinar_abort(callback: CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await callback.answer()
 
 
-# --- Анкета Разбор 3000 ---
+@router.callback_query(F.data == "webinar:join")
+async def cb_webinar_join(callback: CallbackQuery):
+    w = db.get_webinar()
+    if not w or not w["is_active"]:
+        await callback.answer("Вебинар недоступен.", show_alert=True)
+        return
+    db.mark_webinar_attended(callback.from_user.id)
+    await callback.message.edit_reply_markup(reply_markup=kb_webinar_link(w["webinar_link"]))
+    await callback.answer()
+
+
+# ──────────────────────────────────────────────────────────────
+#  ДИАГНОСТИКА ПРЕДНАЗНАЧЕНИЯ
+# ──────────────────────────────────────────────────────────────
+@router.callback_query(F.data == "diag_yes")
+async def cb_diag_yes(callback: CallbackQuery):
+    db.mark_diag_clicked(callback.from_user.id)
+    await callback.message.answer(DIAG_INFO, reply_markup=kb_diag_pay(), parse_mode="HTML")
+    await callback.answer()
+
+
+# ──────────────────────────────────────────────────────────────
+#  АНКЕТА РАЗБОР 3000
+# ──────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "start_razbor_form")
 async def start_razbor_form(callback: CallbackQuery, state: FSMContext):
     await state.set_state(RazborForm.q1)
-    await callback.message.answer("📝 Вопрос 1/5: Укажите ваш возраст:")
+    await callback.message.answer("📝 <b>Вопрос 1/5:</b> Укажите ваш возраст:", parse_mode="HTML")
     await callback.answer()
 
 
@@ -822,36 +873,36 @@ async def start_razbor_form(callback: CallbackQuery, state: FSMContext):
 async def rf_q1(m: Message, state: FSMContext):
     await state.update_data(a1=m.text)
     await state.set_state(RazborForm.q2)
-    await m.answer("📝 Вопрос 2/5: Чем занимаетесь?")
+    await m.answer("📝 <b>Вопрос 2/5:</b> Чем занимаетесь?", parse_mode="HTML")
 
 
 @router.message(RazborForm.q2)
 async def rf_q2(m: Message, state: FSMContext):
     await state.update_data(a2=m.text)
     await state.set_state(RazborForm.q3)
-    await m.answer("📝 Вопрос 3/5: Что больше всего не нравится в лице?")
+    await m.answer("📝 <b>Вопрос 3/5:</b> Что больше всего не нравится в лице?", parse_mode="HTML")
 
 
 @router.message(RazborForm.q3)
 async def rf_q3(m: Message, state: FSMContext):
     await state.update_data(a3=m.text)
     await state.set_state(RazborForm.q4)
-    await m.answer("📝 Вопрос 4/5: Есть ли боли в шее / спине?")
+    await m.answer("📝 <b>Вопрос 4/5:</b> Есть ли боли в шее / спине?", parse_mode="HTML")
 
 
 @router.message(RazborForm.q4)
 async def rf_q4(m: Message, state: FSMContext):
     await state.update_data(a4=m.text)
     await state.set_state(RazborForm.q5)
-    await m.answer("📝 Вопрос 5/5: Что хочешь получить в результате?")
+    await m.answer("📝 <b>Вопрос 5/5:</b> Что хочешь получить в результате?", parse_mode="HTML")
 
 
 @router.message(RazborForm.q5)
 async def rf_q5(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
-    await m.answer("✅ Анкета принята! Ожидайте видеоразбор в ближайшее время.")
-    
+    await m.answer("✅ Анкета принята! Ожидайте видеоразбор в ближайшее время 🙏")
+
     text = (
         f"💎 <b>Анкета (Разбор 3000 ₽)</b>\n"
         f"👤 @{m.from_user.username} | ID: {m.from_user.id}\n\n"
@@ -861,14 +912,17 @@ async def rf_q5(m: Message, state: FSMContext):
         f"4. Боли: {data['a4']}\n"
         f"5. Результат: {m.text}"
     )
-    await bot.send_message(ADMIN_GROUP_ID, text, reply_markup=kb_admin_question(m.from_user.id), parse_mode="HTML")
+    await bot.send_message(ADMIN_GROUP_ID, text,
+                           reply_markup=kb_admin_question(m.from_user.id), parse_mode="HTML")
 
 
-# --- Анкета Диагностика 9900 ---
+# ──────────────────────────────────────────────────────────────
+#  АНКЕТА ДИАГНОСТИКА 9900
+# ──────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "start_diag_form")
 async def start_diag_form(callback: CallbackQuery, state: FSMContext):
     await state.set_state(DiagForm.q1)
-    await callback.message.answer("📝 Вопрос 1/8: Ваше имя:")
+    await callback.message.answer("📝 <b>Вопрос 1/8:</b> Ваше имя:", parse_mode="HTML")
     await callback.answer()
 
 
@@ -876,57 +930,60 @@ async def start_diag_form(callback: CallbackQuery, state: FSMContext):
 async def df_q1(m: Message, state: FSMContext):
     await state.update_data(a1=m.text)
     await state.set_state(DiagForm.q2)
-    await m.answer("📝 Вопрос 2/8: Ваш возраст:")
+    await m.answer("📝 <b>Вопрос 2/8:</b> Ваш возраст:", parse_mode="HTML")
 
 
 @router.message(DiagForm.q2)
 async def df_q2(m: Message, state: FSMContext):
     await state.update_data(a2=m.text)
     await state.set_state(DiagForm.q3)
-    await m.answer("📝 Вопрос 3/8: Чем занимаетесь?")
+    await m.answer("📝 <b>Вопрос 3/8:</b> Чем занимаетесь?", parse_mode="HTML")
 
 
 @router.message(DiagForm.q3)
 async def df_q3(m: Message, state: FSMContext):
     await state.update_data(a3=m.text)
     await state.set_state(DiagForm.q4)
-    await m.answer("📝 Вопрос 4/8: Ваш доход сейчас:")
+    await m.answer("📝 <b>Вопрос 4/8:</b> Ваш доход сейчас:", parse_mode="HTML")
 
 
 @router.message(DiagForm.q4)
 async def df_q4(m: Message, state: FSMContext):
     await state.update_data(a4=m.text)
     await state.set_state(DiagForm.q5)
-    await m.answer("📝 Вопрос 5/8: Что не устраивает прямо сейчас, какая главная боль?")
+    await m.answer("📝 <b>Вопрос 5/8:</b> Что не устраивает прямо сейчас, какая главная боль?",
+                   parse_mode="HTML")
 
 
 @router.message(DiagForm.q5)
 async def df_q5(m: Message, state: FSMContext):
     await state.update_data(a5=m.text)
     await state.set_state(DiagForm.q6)
-    await m.answer("📝 Вопрос 6/8: Чего хотите на самом деле?")
+    await m.answer("📝 <b>Вопрос 6/8:</b> Чего хотите на самом деле?", parse_mode="HTML")
 
 
 @router.message(DiagForm.q6)
 async def df_q6(m: Message, state: FSMContext):
     await state.update_data(a6=m.text)
     await state.set_state(DiagForm.q7)
-    await m.answer("📝 Вопрос 7/8: Где чувствуете, что «не на своём месте»?")
+    await m.answer("📝 <b>Вопрос 7/8:</b> Где чувствуете, что «не на своём месте»?",
+                   parse_mode="HTML")
 
 
 @router.message(DiagForm.q7)
 async def df_q7(m: Message, state: FSMContext):
     await state.update_data(a7=m.text)
     await state.set_state(DiagForm.q8)
-    await m.answer("📝 Вопрос 8/8: Какая жизнь для вас идеальна через 1-3 года?")
+    await m.answer("📝 <b>Вопрос 8/8:</b> Какая жизнь для вас идеальна через 1–3 года?",
+                   parse_mode="HTML")
 
 
 @router.message(DiagForm.q8)
 async def df_q8(m: Message, state: FSMContext):
     data = await state.get_data()
     await state.clear()
-    await m.answer("✅ Анкета принята! Ожидайте результат диагностики в ближайшее время.")
-    
+    await m.answer("✅ Анкета принята! Ожидайте результат диагностики в ближайшее время 🙏")
+
     text = (
         f"🧬 <b>Анкета (Диагностика 9900 ₽)</b>\n"
         f"👤 @{m.from_user.username} | ID: {m.from_user.id}\n\n"
@@ -939,10 +996,11 @@ async def df_q8(m: Message, state: FSMContext):
         f"7. Не на своём месте: {data['a7']}\n"
         f"8. Идеальная жизнь: {m.text}"
     )
-    await bot.send_message(ADMIN_GROUP_ID, text, reply_markup=kb_admin_diag_reply(m.from_user.id), parse_mode="HTML")
+    await bot.send_message(ADMIN_GROUP_ID, text,
+                           reply_markup=kb_admin_diag_reply(m.from_user.id), parse_mode="HTML")
 
 
-# --- Ответ на диагностику с АВТО-АПСЕЛЛОМ ---
+# ─── Ответ на диагностику с авто-апселлом ────────────────────
 @router.callback_query(F.data.startswith("admin_reply_diag:"))
 async def cb_admin_reply_diag(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.message.chat.id, callback.from_user.id):
@@ -965,7 +1023,7 @@ async def admin_send_diag_reply(message: Message, state: FSMContext):
     if not target_id:
         await state.clear()
         return
-    
+
     try:
         await bot.send_message(target_id, "📩 Результат вашей диагностики:")
         await message.copy_to(chat_id=target_id)
@@ -977,43 +1035,18 @@ async def admin_send_diag_reply(message: Message, state: FSMContext):
 
 
 async def _delayed_diag_upsell(tg_id: int):
-    # В тесте: 10 секунд. В бою: случайное время от 5 до 10 минут (300-600 секунд)
     delay = 10 if TEST_MODE else random.randint(300, 600)
     await asyncio.sleep(delay)
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎓 Курс ОстеоФейс", callback_data="buy_request:self")],
-        [InlineKeyboardButton(text="🏆 VIP Сопровождение", callback_data="vip_info")]
-    ])
-    text = (
-        "Теперь важно не просто понять, а изменить результат.\n\n"
-        "Есть 2 варианта:\n"
-        "1. Сделать всё самому (курс)\n"
-        "2. Сделать быстрее со мной (сопровождение)"
-    )
-    try: 
-        await bot.send_message(tg_id, text, reply_markup=kb)
-    except Exception: 
-        pass
 
-@router.callback_query(F.data == "cancel_webinar_abort")
-async def cb_cancel_webinar_abort(callback: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌸 Курс ОстеоФейс", callback_data="buy_request:self")],
+        [InlineKeyboardButton(text="🏆 VIP-сопровождение", callback_data="vip_info")]
+    ])
     try:
-        await callback.message.delete()
+        await bot.send_message(tg_id, DIAG_UPSELL_AFTER, reply_markup=kb, parse_mode="HTML")
     except Exception:
         pass
-    await callback.answer()
 
-@router.callback_query(F.data == "webinar:join")
-async def cb_webinar_join(callback: CallbackQuery):
-    w = db.get_webinar()
-    if not w or not w["is_active"]:
-        await callback.answer("Вебинар недоступен.", show_alert=True)
-        return
-    
-    db.mark_webinar_attended(callback.from_user.id)
-    await callback.message.edit_reply_markup(reply_markup=kb_webinar_link(w["webinar_link"]))
-    await callback.answer()
 
 # ──────────────────────────────────────────────────────────────
 #  СПИСОК ПОЛЬЗОВАТЕЛЕЙ (пагинация)
@@ -1156,7 +1189,6 @@ async def cb_fedit_day(callback: CallbackQuery, state: FSMContext):
     day = int(day_str)
     await state.update_data(fedit_tag=tag, fedit_day=day)
 
-    # Показываем текущее содержимое
     override = db.get_funnel_content(tag, day)
     if override and override["text"]:
         current = f"📝 Текущий текст:\n\n{override['text']}\n\n"
@@ -1178,14 +1210,6 @@ async def cb_fedit_day(callback: CallbackQuery, state: FSMContext):
     await state.set_state(FunnelEditState.waiting_for_text)
     await callback.answer()
 
-@router.message(FunnelEditState.waiting_for_btn_text)
-async def fedit_receive_btn_text(message: Message, state: FSMContext):
-    text = message.text or ""
-    if not text.strip():
-        return
-    await state.update_data(fedit_btn_text=text.strip())
-    await state.set_state(FunnelEditState.waiting_for_btn_url)
-    await message.answer("🔗 Теперь отправьте <b>ссылку</b> для этой кнопки:", parse_mode="HTML")
 
 @router.message(FunnelEditState.waiting_for_text)
 async def fedit_receive_text(message: Message, state: FSMContext):
@@ -1201,16 +1225,6 @@ async def fedit_receive_text(message: Message, state: FSMContext):
         reply_markup=kb_funnel_skip_media(), parse_mode="HTML"
     )
 
-@router.callback_query(F.data == "fedit_skip_btn")
-async def fedit_skip_btn(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    db.set_funnel_content(
-        data["fedit_tag"], data["fedit_day"], data["fedit_text"],
-        data.get("fedit_media_id", ""), data.get("fedit_media_type", ""), "", ""
-    )
-    await state.clear()
-    await callback.message.answer(f"✅ День {data['fedit_day']} ветки «{data['fedit_tag']}» обновлён!")
-    await callback.answer()
 
 @router.callback_query(F.data == "fedit_skip_media")
 async def fedit_skip_media(callback: CallbackQuery, state: FSMContext):
@@ -1222,29 +1236,14 @@ async def fedit_skip_media(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-@router.message(FunnelEditState.waiting_for_btn_url)
-async def fedit_receive_btn_url(message: Message, state: FSMContext):
-    url = (message.text or "").strip()
-    if not url.startswith("http"):
-        await message.answer("⚠️ Ссылка должна начинаться с http://")
-        return
-    
-    data = await state.get_data()
-    db.set_funnel_content(
-        data["fedit_tag"], data["fedit_day"], data["fedit_text"],
-        data.get("fedit_media_id", ""), data.get("fedit_media_type", ""),
-        data["fedit_btn_text"], url
-    )
-    await state.clear()
-    await message.answer(f"✅ День {data['fedit_day']} ветки «{data['fedit_tag']}» обновлён с новой кнопкой!")
 
 @router.message(FunnelEditState.waiting_for_media)
 async def fedit_receive_media(message: Message, state: FSMContext):
     if message.photo:
-        file_id   = message.photo[-1].file_id
+        file_id    = message.photo[-1].file_id
         media_type = "photo"
     elif message.video:
-        file_id   = message.video.file_id
+        file_id    = message.video.file_id
         media_type = "video"
     else:
         await message.answer("⚠️ Это не фото и не видео. Отправьте медиафайл или нажмите «Пропустить».")
@@ -1256,6 +1255,45 @@ async def fedit_receive_media(message: Message, state: FSMContext):
         "🔘 Отправьте <b>текст для кнопки</b> (или нажмите пропустить):",
         reply_markup=kb_funnel_skip_button(), parse_mode="HTML"
     )
+
+
+@router.message(FunnelEditState.waiting_for_btn_text)
+async def fedit_receive_btn_text(message: Message, state: FSMContext):
+    text = message.text or ""
+    if not text.strip():
+        return
+    await state.update_data(fedit_btn_text=text.strip())
+    await state.set_state(FunnelEditState.waiting_for_btn_url)
+    await message.answer("🔗 Теперь отправьте <b>ссылку</b> для этой кнопки:", parse_mode="HTML")
+
+
+@router.callback_query(F.data == "fedit_skip_btn")
+async def fedit_skip_btn(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    db.set_funnel_content(
+        data["fedit_tag"], data["fedit_day"], data["fedit_text"],
+        data.get("fedit_media_id", ""), data.get("fedit_media_type", ""), "", ""
+    )
+    await state.clear()
+    await callback.message.answer(f"✅ День {data['fedit_day']} ветки «{data['fedit_tag']}» обновлён!")
+    await callback.answer()
+
+
+@router.message(FunnelEditState.waiting_for_btn_url)
+async def fedit_receive_btn_url(message: Message, state: FSMContext):
+    url = (message.text or "").strip()
+    if not url.startswith("http"):
+        await message.answer("⚠️ Ссылка должна начинаться с http://")
+        return
+
+    data = await state.get_data()
+    db.set_funnel_content(
+        data["fedit_tag"], data["fedit_day"], data["fedit_text"],
+        data.get("fedit_media_id", ""), data.get("fedit_media_type", ""),
+        data["fedit_btn_text"], url
+    )
+    await state.clear()
+    await message.answer(f"✅ День {data['fedit_day']} ветки «{data['fedit_tag']}» обновлён с новой кнопкой!")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1430,20 +1468,12 @@ async def payment_webhook_handler(request: web.Request) -> web.Response:
             if user and not user["is_paid"]:
                 db.mark_paid(tg_id)
                 await bot.send_message(tg_id, PAYMENT_SUCCESS_COURSE,
-                                       reply_markup=kb_payment_success())
+                                       reply_markup=kb_payment_success(),
+                                       parse_mode="HTML")
         except Exception as e:
             logger.error(f"[webhook] {e}")
 
     return web.Response(text="ok")
-
-
-async def start_webhook_server():
-    app = web.Application()
-    app.router.add_post("/webhook/monecle", payment_webhook_handler)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, WEBHOOK_HOST, WEBHOOK_PORT).start()
-    logger.info(f"Webhook server on {WEBHOOK_HOST}:{WEBHOOK_PORT}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1454,11 +1484,17 @@ async def main():
     dp.include_router(router)
     setup_scheduler()
     scheduler.start()
-    await start_webhook_server()
     await _pin_admin_panel()
     logger.info(f"Bot started. Mode: {'TEST' if TEST_MODE else 'PRODUCTION'}")
     await dp.start_polling(bot)
 
+@router.message(F.pinned_message, F.chat.id == ADMIN_GROUP_ID)
+async def delete_pin_notification(message: Message):
+    """Удаляет системное сообщение 'X закрепил(а) сообщение' в админ-чате."""
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     asyncio.run(main())
