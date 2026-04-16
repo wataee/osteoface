@@ -121,6 +121,7 @@ def init_db():
             ("diag_paid",              "INTEGER DEFAULT 0"),
             ("diag_remind_1h_sent",    "INTEGER DEFAULT 0"),
             ("diag_remind_24h_sent",   "INTEGER DEFAULT 0"),
+            ("protocol_paid",          "INTEGER DEFAULT 0"),   # Мини-протокол 7000₽
         ])
         _safe_add_columns(conn, "webinar_settings", [
             ("admin_msg_id",    "INTEGER DEFAULT 0"),
@@ -273,6 +274,16 @@ def mark_razbor_paid(tg_id: int):
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         conn.execute(
             'UPDATE users SET razbor_paid=1, paid_date=? WHERE tg_id=?',
+            (now, tg_id)
+        )
+
+
+# ─── Мини-протокол (7000₽) ───────────────────────────────────
+def mark_protocol_paid(tg_id: int):
+    with get_conn() as conn:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute(
+            'UPDATE users SET protocol_paid=1, paid_date=? WHERE tg_id=?',
             (now, tg_id)
         )
 

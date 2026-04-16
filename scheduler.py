@@ -14,6 +14,7 @@ from content import (
     RAZBOR_REMIND_1H, RAZBOR_REMIND_24H,
     VIP_REMIND_1H, VIP_REMIND_24H,
     PAYMENT_SUCCESS_COURSE, PAYMENT_SUCCESS_RAZBOR, PAYMENT_SUCCESS_VIP,
+    PAYMENT_SUCCESS_PROTOCOL, PROTOCOL_UPSELL_AFTER_RAZBOR,
     DIAG_REMIND_1H, DIAG_REMIND_24H,
     DIAG_PAID_SUCCESS,
     RAZBOR_PAID_MSG_1, RAZBOR_PAID_MSG_2, RAZBOR_PAID_MSG_3,
@@ -473,12 +474,14 @@ async def job_check_payments(bot: Bot):
             intent = user["last_buy_intent"] or "course"
             product = order.get("product_name", "").lower()
 
-            is_diag   = ("предназначени" in product) or (int(amount) == 9900)
-            is_razbor = ("разбор" in product) or (int(amount) == 3000)
-            is_vip    = ("vip" in product) or (int(amount) > 10000)
+            is_diag     = ("предназначени" in product) or (int(amount) == 9900)
+            is_razbor   = ("разбор" in product) or (int(amount) == 3000)
+            is_protocol = ("протокол" in product) or (int(amount) == 7000)
+            is_vip      = ("vip" in product) or (int(amount) > 10000)
 
             _KNOWN_PAID_ORDERS.add(order_id)
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from config import PAY_URL_PROTOCOL
 
             if is_diag and not user.get("diag_paid"):
                 db.mark_diag_paid(tg_id)
@@ -500,14 +503,43 @@ async def job_check_payments(bot: Bot):
                 except Exception:
                     pass
 
+            elif is_protocol and not user.get("protocol_paid"):
+                db.mark_protocol_paid(tg_id)
+                try:
+                    await bot.send_message(
+                        tg_id, PAYMENT_SUCCESS_PROTOCOL, parse_mode="HTML"
+                    )
+                    kb_ls = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
+                    ])
+                    await bot.send_message(
+                        ADMIN_GROUP_ID,
+                        f"🎯 <b>Оплачен мини-протокол (7000)!</b>\nПользователь: {uname}\nСумма: {amount} ₽",
+                        reply_markup=kb_ls, parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
             elif is_razbor and not user["razbor_paid"]:
                 db.mark_razbor_paid(tg_id)
                 try:
+                    await bot.send_message(tg_id, PAYMENT_SUCCESS_RAZBOR, parse_mode="HTML")
+                    await asyncio.sleep(2)
                     await bot.send_message(tg_id, RAZBOR_PAID_MSG_1, parse_mode="HTML")
                     await asyncio.sleep(1)
                     await bot.send_message(tg_id, RAZBOR_PAID_MSG_2, parse_mode="HTML")
                     await asyncio.sleep(1)
-                    await bot.send_message(tg_id, RAZBOR_PAID_MSG_3, parse_mode="HTML")
+                    # Апселл на мини-протокол 7000₽
+                    kb_protocol = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(
+                            text="🎯 Получить мини-протокол за 7 000 ₽",
+                            url=PAY_URL_PROTOCOL
+                        )
+                    ]])
+                    await bot.send_message(
+                        tg_id, PROTOCOL_UPSELL_AFTER_RAZBOR,
+                        reply_markup=kb_protocol, parse_mode="HTML"
+                    )
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
