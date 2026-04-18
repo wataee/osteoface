@@ -8,73 +8,36 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart, CommandObject, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from keyboards import kb_funnel_skip_button, kb_course_landing
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardRemove,
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import (
-    BOT_TOKEN, ADMIN_USER_ID, ADMIN_GROUP_ID,
-    WEBHOOK_SECRET, WEBHOOK_HOST, WEBHOOK_PORT, TIMEZONE,
-    PAY_URL_SELF, PAY_URL_PRO, PAY_URL, PAY_URL_RAZBOR, PAY_URL_VIP,
-)
+from config import *
 import database as db
-from content import (
-    WELCOME, ACTION_SELECT,
-    DAY0, VIDEO_CAPTIONS,
-    RAZBOR_REQUEST, RAZBOR_ALREADY_SENT, RAZBOR_RECEIVED,
-    RAZBOR_PHOTO_REPLY_1, RAZBOR_PHOTO_REPLY_2, RAZBOR_PHOTO_REPLY_3,
-    RAZBOR_FOLLOWUP_1, RAZBOR_FOLLOWUP_2,
-    RAZBOR_ABANDONED_CART, RAZBOR_PAY_LINK_READY,
-    HOCHU_REPLY_1, HOCHU_REPLY_2, DOUBT_UPSELL,
-    WEBINAR_REGISTERED_OK, WEBINAR_NOT_ACTIVE,
-    COURSES_INFO, COURSE_LANDING_INFO, VIP_DESCRIPTION, VIP_UPSELL_AFTER_RAZBOR,
-    VIP_ACCESS_READY, PHONE_REQUEST, COURSE_ACCESS_READY,
-    CONTACT_SAVED, CONTACT_PLACE_RESERVED,
-    PAYMENT_SUCCESS_COURSE, PAYMENT_SUCCESS_RAZBOR, PAYMENT_SUCCESS_VIP,
-    DIAG_INFO, DIAG_UPSELL_AFTER,
-    WARMUP,
-)
-from keyboards import (
-    kb_main_menu, kb_day0_info, kb_channel,
-    kb_courses_links, kb_vip_buy, kb_pay,
-    kb_pay_self, kb_pay_pro,
-    kb_webinar_register, kb_payment_success,
-    kb_request_phone, kb_cancel_admin,
-    kb_admin_menu, kb_admin_webinar_menu, kb_admin_broadcast_menu, kb_admin_question,
-    kb_cancel_webinar_confirm, kb_after_razbor_paid,
-    kb_razbor_personal_pay,
-    kb_users_list, kb_user_back,
-    kb_funnel_branch_menu, kb_funnel_day_menu, kb_funnel_skip_media, kb_webinar_link,
-    kb_start_razbor_form, kb_start_diag_form,
-    kb_diag_pay, kb_admin_diag_reply, kb_persistent_main,
-)
+from content import *
+from keyboards import *
 
-from scheduler import (
-    job_daily_warmup, job_daily_post_webinar,
-    job_buy_reminders, job_razbor_reminders, job_vip_reminders,
-    job_webinar_reminders, job_check_payments, job_diag_reminders,
-)
+from scheduler import *
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 
-dp  = Dispatcher()
+dp = Dispatcher()
 router = Router()
 
 TEST_MODE = False
-scheduler = AsyncIOScheduler(timezone=TIMEZONE)
-
-TAG_MAP = {"otoki": "отёки", "podtyazhka": "подтяжка", "obuchenie": "обучение"}
-
 
 # ══════════════════════════════════════════════════════════════
 #  FSM
 # ══════════════════════════════════════════════════════════════
+class PhotoState(StatesGroup):
+    waiting = State()
+
+
 class RazborState(StatesGroup):
     waiting_for_photo = State()
 
@@ -82,29 +45,36 @@ class RazborState(StatesGroup):
 class AdminReplyState(StatesGroup):
     waiting_for_reply = State()
 
+
 class AdminWriteState(StatesGroup):
     waiting_for_msg = State()
 
+
 class AdminBroadcastState(StatesGroup):
     waiting_for_text = State()
-    confirm          = State()
+    confirm = State()
+
 
 class AskQuestionState(StatesGroup):
     waiting_for_question = State()
 
+
 class WebinarSetupState(StatesGroup):
-    waiting_for_text     = State()
-    waiting_for_link     = State()
+    waiting_for_text = State()
+    waiting_for_link = State()
     waiting_for_datetime = State()
 
+
 class FunnelEditState(StatesGroup):
-    waiting_for_text  = State()
+    waiting_for_text = State()
     waiting_for_media = State()
     waiting_for_btn_text = State()
-    waiting_for_btn_url  = State()
+    waiting_for_btn_url = State()
+
 
 class RazborTemplateEditState(StatesGroup):
     waiting_for_text = State()
+
 
 class RazborForm(StatesGroup):
     q1 = State()
@@ -112,6 +82,7 @@ class RazborForm(StatesGroup):
     q3 = State()
     q4 = State()
     q5 = State()
+
 
 class DiagForm(StatesGroup):
     q1 = State()
@@ -123,8 +94,10 @@ class DiagForm(StatesGroup):
     q7 = State()
     q8 = State()
 
+
 class AdminReplyDiagState(StatesGroup):
     waiting = State()
+
 
 class AdminWebinarState(StatesGroup):
     waiting_for_date = State()
@@ -138,53 +111,22 @@ def is_admin(chat_id: int, user_id: int) -> bool:
     return user_id == ADMIN_USER_ID or chat_id == ADMIN_GROUP_ID
 
 
-def setup_scheduler():
-    scheduler.remove_all_jobs()
-    if TEST_MODE:
-        scheduler.add_job(job_daily_warmup,       "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_daily_post_webinar, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_webinar_reminders,  "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_buy_reminders,      "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_razbor_reminders,   "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_vip_reminders,      "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_diag_reminders,     "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_check_payments,     "interval", seconds=10, args=[bot])
-        logger.info("Scheduler: TEST MODE")
-    else:
-        scheduler.add_job(job_daily_warmup,       "interval", hours=1,    args=[bot, False])
-        scheduler.add_job(job_daily_post_webinar, "interval", hours=1,    args=[bot, False])
-        scheduler.add_job(job_webinar_reminders,  "interval", minutes=10, args=[bot, False])
-        scheduler.add_job(job_buy_reminders,      "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_razbor_reminders,   "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_vip_reminders,      "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_diag_reminders,     "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_check_payments,     "interval", minutes=2,  args=[bot])
-        logger.info("Scheduler: PRODUCTION MODE")
-
-
 # ══════════════════════════════════════════════════════════════
 #  /cleardb — очистка БД + переотправка закрепа
 # ══════════════════════════════════════════════════════════════
 @router.message(Command("cleardb"))
 async def cmd_cleardb(message: Message, state: FSMContext):
-    if not is_admin(message.chat.id, message.from_user.id):
+    if message.from_user.id != ADMIN_USER_ID:
         return
-    # Снять закреп и удалить старую панель ДО очистки БД
-    try:
-        await bot.unpin_all_chat_messages(chat_id=ADMIN_GROUP_ID)
-    except Exception:
-        pass
     old_msg_id = db.get_admin_msg_id()
     if old_msg_id:
         try:
             await bot.delete_message(ADMIN_GROUP_ID, old_msg_id)
         except Exception:
             pass
-    # Очистить БД
     db.clear_all_data()
     await state.clear()
     await message.answer("✅ База данных полностью очищена.")
-    # Переотправить и закрепить панель администратора
     await _pin_admin_panel()
 
 
@@ -192,9 +134,9 @@ async def cmd_cleardb(message: Message, state: FSMContext):
 #  ДЕНЬ 0 — отправка приветствия ветки
 # ══════════════════════════════════════════════════════════════
 async def send_day0(target: Message, tag: str):
-    data     = DAY0[tag]
+    data = DAY0[tag]
     video_id = (data.get("video") or "").strip() if isinstance(data, dict) else ""
-    text     = data.get("text", "") if isinstance(data, dict) else str(data)
+    text = data.get("text", "") if isinstance(data, dict) else str(data)
 
     if video_id:
         caption = VIDEO_CAPTIONS.get(tag, "")
@@ -214,54 +156,75 @@ async def send_day0(target: Message, tag: str):
 #  /start
 # ══════════════════════════════════════════════════════════════
 @router.message(CommandStart())
-async def cmd_start(message: Message, command: CommandObject, state: FSMContext):
+async def cmd_start(message, state: FSMContext):
     await state.clear()
-    user = message.from_user
-    if not user:
-        return
-
-    if message.chat.type in ("group", "supergroup"):
-        me = await bot.get_me()
-        try:
-            await message.reply(f"👋 Напишите мне в личку: @{me.username}")
-        except Exception:
-            pass
-        return
-
-    await message.answer(ACTION_SELECT, reply_markup=kb_persistent_main())
-
-    args  = command.args or ""
-    tg_id = user.id
-
-    if args in TAG_MAP:
-        tag = TAG_MAP[args]
-        db.upsert_user(tg_id, tag, user.username, user.full_name)
-        await send_day0(message, tag)
-    else:
-        await message.answer(WELCOME, reply_markup=kb_main_menu())
-
-
-# ─── Главное меню (reply-кнопка) ─────────────────────────────
-@router.message(F.text == "🔙 Главное меню")
-@router.message(F.text.lower().in_({"старт", "начать", "start"}))
-async def handle_main_menu_btn(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(ACTION_SELECT, reply_markup=kb_persistent_main())
+    await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
     await message.answer(WELCOME, reply_markup=kb_main_menu())
 
+@router.message(F.text == "🔙 Главное меню")
+async def handle_main_menu_btn(message, state: FSMContext):
+    await state.clear()
+    await message.answer(WELCOME, reply_markup=kb_main_menu())
 
-# ─── Выбор ветки ─────────────────────────────────────────────
+@router.callback_query(F.data.startswith("branch:"))
+async def cb_branch(callback: CallbackQuery):
+    branch = callback.data.split(":")[1]
+    if branch == "razbor":
+        await callback.message.answer(PROBLEM_ASK, reply_markup=kb_problems())
+    elif branch == "webinar":
+        await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("problem:"))
+async def cb_problem(callback: CallbackQuery):
+    tg_id = callback.from_user.id
+    problem_key = callback.data.split(":")[1]
+    
+    reply_text = PROBLEM_REPLIES.get(problem_key, "У тебя типичная ситуация, которую я вижу у 90% людей.")
+    await callback.message.answer(reply_text)
+    
+    await asyncio.sleep(1)
+    
+    await callback.message.answer(RAZBOR_OFFER, reply_markup=kb_razbor_pay(tg_id))
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("tag:"))
-async def cb_tag_select(callback: CallbackQuery):
-    user   = callback.from_user
+async def cb_tag_select(callback: CallbackQuery, state: FSMContext):
     choice = callback.data.split(":")[1]
-    if choice not in TAG_MAP:
+    tag = TAG_MAP.get(choice)
+    if not tag:
+        await callback.answer("Ветка не найдена")
+        return
+    db.upsert_user(callback.from_user.id, tag, callback.from_user.username, callback.from_user.full_name)
+    data = DAY0.get(tag)
+    if not data:
+        await callback.message.answer("Информация по этой ветке временно недоступна.")
         await callback.answer()
         return
-    tag = TAG_MAP[choice]
-    db.upsert_user(user.id, tag, user.username, user.full_name)
+    await callback.message.answer(data.get("text", "Разберём вашу ситуацию."), parse_mode="HTML")
+    video_id = data.get("video")
+    if video_id:
+        try:
+            caption = VIDEO_CAPTIONS.get(tag, "")
+            await callback.message.answer_video(video=video_id, caption=caption)
+            await asyncio.sleep(2)
+        except Exception as e:
+            logger.error(f"Video send error: {e}")
+    await asyncio.sleep(1)
+    await callback.message.answer(
+        "📸 <b>Пришлите фото вашего лица анфас прямо сюда в чат.</b>\n\n"
+        "Желательно без масок и фильтров, при хорошем освещении. Можно добавить фото в профиль (сбоку)."
+    )
+    await state.set_state(RazborState.waiting_for_photo)
     await callback.answer()
-    await send_day0(callback.message, tag)
+
+
+@router.callback_query(F.data == "fast_solve")
+async def cb_fast_solve(callback: CallbackQuery):
+    await callback.message.answer("Выберите, что вас беспокоит:", reply_markup=kb_problem_selection())
+    await callback.answer()
 
 
 # ─── Информация о курсах ─────────────────────────────────────
@@ -405,20 +368,30 @@ async def cb_razbor(callback: CallbackQuery, state: FSMContext):
 @router.message(RazborState.waiting_for_photo)
 async def receive_razbor_photo(message: Message, state: FSMContext):
     tg_id = message.from_user.id
-    if not message.photo:
-        await message.answer("⚠️ Это не фото! Пожалуйста, пришлите фотографию лица.")
+    if not message.photo and not message.video:
+        await message.answer("⚠️ Пожалуйста, пришлите фотографию или видео лица.")
         return
     db.upsert_user(tg_id, "разбор", message.from_user.username, message.from_user.full_name)
     db.mark_razbor_photo_sent(tg_id)
     await state.clear()
-
+    user_info = (
+        f"📸 <b>Новое фото на разбор!</b>\n"
+        f"👤 {message.from_user.full_name} (@{message.from_user.username})\n"
+        f"🆔 <code>{tg_id}</code>"
+    )
+    try:
+        if message.photo:
+            await bot.send_photo(ADMIN_GROUP_ID, photo=message.photo[-1].file_id, caption=user_info, parse_mode="HTML", reply_markup=kb_admin_question(tg_id))
+        elif message.video:
+            await bot.send_video(ADMIN_GROUP_ID, video=message.video.file_id, caption=user_info, parse_mode="HTML", reply_markup=kb_admin_question(tg_id))
+    except Exception as e:
+        logger.error(f"Error: {e}")
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_1)
     await asyncio.sleep(1)
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_2)
     await asyncio.sleep(1)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💎 Персональный разбор — 3 000 ₽",
-                             callback_data="buy_razbor_personal")
+        InlineKeyboardButton(text="💎 Персональный разбор — 3 000 ₽", callback_data="buy_razbor_personal")
     ]])
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_3, reply_markup=kb)
     db.mark_razbor_auto_replied(tg_id)
@@ -468,6 +441,18 @@ async def _abandoned_cart_razbor(tg_id: int):
             InlineKeyboardButton(text="💬 Задать вопрос", callback_data="ask_question")
         ]])
         await bot.send_message(tg_id, RAZBOR_ABANDONED_CART, reply_markup=kb)
+
+
+@router.callback_query(F.data == "pay_protocol_click")
+async def cb_pay_protocol_click(callback: CallbackQuery):
+    tg_id = callback.from_user.id
+    db.mark_protocol_pay_click(tg_id)
+    db.set_last_buy_intent(tg_id, "protocol")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Оплатить 7 000 ₽", url=f"{PAY_URL_PROTOCOL}?tg_id={tg_id}")]
+    ])
+    await callback.message.answer(f"🎯 Ссылка на оплату Мини-протокола (7 000 ₽):", reply_markup=kb)
+    await callback.answer()
 
 
 @router.message(F.text.lower() == "хочу")
@@ -546,12 +531,7 @@ async def cb_webinar_register(callback: CallbackQuery):
 # ══════════════════════════════════════════════════════════════
 #  АДМИНИСТРАТИВНАЯ ПАНЕЛЬ
 # ══════════════════════════════════════════════════════════════
-
 async def _pin_admin_panel():
-    try:
-        await bot.unpin_all_chat_messages(chat_id=ADMIN_GROUP_ID)
-    except Exception:
-        pass
     old = db.get_admin_msg_id()
     if old:
         try:
@@ -559,13 +539,13 @@ async def _pin_admin_panel():
         except Exception:
             pass
     try:
+        await bot.unpin_all_chat_messages(chat_id=ADMIN_GROUP_ID)
         msg = await bot.send_message(
             ADMIN_GROUP_ID,
             "🔧 <b>Панель OsteoFace</b>\n\nНажми нужную кнопку 👇",
             reply_markup=kb_admin_menu(TEST_MODE), parse_mode="HTML"
         )
-        await bot.pin_chat_message(ADMIN_GROUP_ID, msg.message_id,
-                                   disable_notification=True)
+        await bot.pin_chat_message(ADMIN_GROUP_ID, msg.message_id, disable_notification=True)
         db.set_admin_msg_id(msg.message_id)
     except Exception:
         pass
@@ -573,7 +553,7 @@ async def _pin_admin_panel():
 
 @router.message(Command("panel"))
 async def cmd_panel(message: Message, state: FSMContext):
-    if not is_admin(message.chat.id, message.from_user.id):
+    if message.from_user.id != ADMIN_USER_ID:
         return
     await state.clear()
     try:
@@ -589,24 +569,29 @@ async def cmd_panel(message: Message, state: FSMContext):
 @router.callback_query(F.data == "admin:panel")
 async def cb_admin_panel(callback: CallbackQuery, state: FSMContext):
     if not is_admin(callback.message.chat.id, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
         return
     await state.clear()
-    await callback.message.answer(
-        "🔧 <b>Панель OsteoFace</b>",
-        reply_markup=kb_admin_menu(TEST_MODE), parse_mode="HTML"
-    )
+    if callback.message.chat.id == ADMIN_GROUP_ID:
+        await _pin_admin_panel()
+    else:
+        await callback.message.edit_text(
+            "🔧 <b>Панель OsteoFace</b>",
+            reply_markup=kb_admin_menu(TEST_MODE), parse_mode="HTML"
+        )
     await callback.answer()
 
 
 @router.callback_query(F.data == "admin_cancel", StateFilter("*"))
 async def cb_admin_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-    await callback.answer("Отменено.")
+    if callback.message.chat.id == ADMIN_GROUP_ID:
+        await _pin_admin_panel()
+    else:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+    await callback.answer()
 
 
 # ─── Тест-режим ──────────────────────────────────────────────
@@ -617,7 +602,7 @@ async def cb_toggle_test(callback: CallbackQuery):
         return
     global TEST_MODE
     TEST_MODE = not TEST_MODE
-    setup_scheduler()
+    setup_scheduler(bot, TEST_MODE)
     await callback.message.edit_reply_markup(reply_markup=kb_admin_menu(TEST_MODE))
     await callback.answer(f"Режим: {'🔴 ТЕСТ' if TEST_MODE else '🟢 БОЕВОЙ'}", show_alert=True)
 
@@ -745,7 +730,7 @@ async def webinar_setup_datetime(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     broadcast_text = data.get("webinar_broadcast_text", "")
-    link           = data.get("webinar_link", "")
+    link = data.get("webinar_link", "")
 
     await state.update_data(
         webinar_dt_str=webinar_dt.strftime("%Y-%m-%d %H:%M:%S"),
@@ -770,9 +755,9 @@ async def webinar_setup_confirm(callback: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     broadcast_text = data.get("webinar_broadcast_text", "")
-    link           = data.get("webinar_link", "")
-    dt_str         = data.get("webinar_dt_str", "")
-    dt_display     = data.get("webinar_dt_display", "")
+    link = data.get("webinar_link", "")
+    dt_str = data.get("webinar_dt_str", "")
+    dt_display = data.get("webinar_dt_display", "")
     await state.clear()
 
     db.update_webinar(dt_str, link, broadcast_text)
@@ -1056,7 +1041,7 @@ async def cb_users_list(callback: CallbackQuery):
     if not is_admin(callback.message.chat.id, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    page   = int(callback.data.split(":")[2])
+    page = int(callback.data.split(":")[2])
     offset = page * db.USERS_PER_PAGE
     users, total = db.get_users_page(offset)
 
@@ -1078,10 +1063,10 @@ async def cb_user_info(callback: CallbackQuery):
     if not is_admin(callback.message.chat.id, callback.from_user.id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
-    parts  = callback.data.split(":")
-    tg_id  = int(parts[1])
-    page   = int(parts[2]) if len(parts) > 2 else 0
-    u      = db.get_user(tg_id)
+    parts = callback.data.split(":")
+    tg_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
+    u = db.get_user(tg_id)
 
     if not u:
         await callback.answer("Пользователь не найден.", show_alert=True)
@@ -1240,10 +1225,10 @@ async def fedit_skip_media(callback: CallbackQuery, state: FSMContext):
 @router.message(FunnelEditState.waiting_for_media)
 async def fedit_receive_media(message: Message, state: FSMContext):
     if message.photo:
-        file_id    = message.photo[-1].file_id
+        file_id = message.photo[-1].file_id
         media_type = "photo"
     elif message.video:
-        file_id    = message.video.file_id
+        file_id = message.video.file_id
         media_type = "video"
     else:
         await message.answer("⚠️ Это не фото и не видео. Отправьте медиафайл или нажмите «Пропустить».")
@@ -1369,7 +1354,7 @@ async def broadcast_get_text(message: Message, state: FSMContext):
     await state.set_state(AdminBroadcastState.confirm)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Отправить", callback_data="bcast_confirm"),
-        InlineKeyboardButton(text="❌ Отмена",    callback_data="bcast_cancel"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="bcast_cancel"),
     ]])
     await message.answer(
         f"📋 Предпросмотр:\n\n{text}\n\nАудитория: <b>{audience}</b>\n\nПодтвердить?",
@@ -1384,7 +1369,7 @@ async def broadcast_confirm(callback: CallbackQuery, state: FSMContext):
         return
     data = await state.get_data()
     audience = data.get("broadcast_audience", "all")
-    text     = data.get("broadcast_text", "")
+    text = data.get("broadcast_text", "")
     await state.clear()
 
     if audience == "all":
@@ -1459,12 +1444,12 @@ async def payment_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=400)
 
     tg_id_raw = data.get("tg_id") or data.get("metadata", {}).get("tg_id")
-    status    = data.get("status", "")
+    status = data.get("status", "")
 
     if tg_id_raw and str(status).lower() in ("paid", "success", "completed"):
         try:
             tg_id = int(tg_id_raw)
-            user  = db.get_user(tg_id)
+            user = db.get_user(tg_id)
             if user and not user["is_paid"]:
                 db.mark_paid(tg_id)
                 await bot.send_message(tg_id, PAYMENT_SUCCESS_COURSE,
@@ -1482,15 +1467,14 @@ async def payment_webhook_handler(request: web.Request) -> web.Response:
 async def main():
     db.init_db()
     dp.include_router(router)
-    setup_scheduler()
-    scheduler.start()
+    setup_scheduler(bot, TEST_MODE)
     await _pin_admin_panel()
     logger.info(f"Bot started. Mode: {'TEST' if TEST_MODE else 'PRODUCTION'}")
     await dp.start_polling(bot)
 
+
 @router.message(F.pinned_message, F.chat.id == ADMIN_GROUP_ID)
 async def delete_pin_notification(message: Message):
-    """Удаляет системное сообщение 'X закрепил(а) сообщение' в админ-чате."""
     try:
         await message.delete()
     except Exception:
