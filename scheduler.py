@@ -426,6 +426,13 @@ async def job_check_payments(bot: Bot):
                     await bot.send_message(
                         tg_id, PAYMENT_SUCCESS_PROTOCOL, parse_mode="HTML"
                     )
+                    await asyncio.sleep(3)
+                    # Апселл на основной курс 49 000 ₽
+                    from keyboards import kb_course_pay_direct
+                    await bot.send_message(
+                        tg_id, UPSELL_49000_AFTER_PROTOCOL,
+                        reply_markup=kb_course_pay_direct(tg_id), parse_mode="HTML"
+                    )
                     kb_ls = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text="💬 Написать в ЛС", url=f"tg://user?id={tg_id}")]
                     ])
@@ -514,6 +521,26 @@ async def job_check_payments(bot: Bot):
         pass
     except Exception as e:
         logger.error(f"[check_payments] {e}")
+
+
+# ══════════════════════════════════════════════════════════════
+#  JOB 7 — ТРИГГЕР ДЛЯ «МОЛЧУНОВ» (72 ЧАСА)
+# ══════════════════════════════════════════════════════════════
+async def job_global_72h_trigger(bot: Bot):
+    """Отправляет финальное триггер-сообщение пользователям, которые молчат 72ч+ и ничего не купили."""
+    users = db.get_silent_72h_users()
+    for user in users:
+        tg_id = user["tg_id"]
+        try:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Написать мастеру", callback_data="ask_question")],
+                [InlineKeyboardButton(text="🔥 Убрать проблему", callback_data="fast_solve")],
+            ])
+            if await safe_send(bot, tg_id, SILENCE_72H, kb):
+                db.mark_silence_triggered(tg_id)
+        except Exception as e:
+            logger.error(f"[72h_trigger] user {tg_id}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -634,6 +661,7 @@ def setup_scheduler(bot: Bot, is_test: bool = False):
         scheduler.add_job(job_diag_reminders, "interval", seconds=10, args=[bot, True])
         scheduler.add_job(job_check_payments, "interval", seconds=10, args=[bot])
         scheduler.add_job(job_reminders, "interval", seconds=10, args=[bot, True])
+        scheduler.add_job(job_global_72h_trigger, "interval", seconds=30, args=[bot])
         logger.info("Scheduler: TEST MODE")
     else:
         # Боевой режим — реальные интервалы
@@ -644,6 +672,7 @@ def setup_scheduler(bot: Bot, is_test: bool = False):
         scheduler.add_job(job_diag_reminders, "interval", minutes=30, args=[bot, False])
         scheduler.add_job(job_check_payments, "interval", minutes=2, args=[bot])
         scheduler.add_job(job_reminders, "interval", minutes=30, args=[bot, False])
+        scheduler.add_job(job_global_72h_trigger, "interval", hours=6, args=[bot])
         logger.info("Scheduler: PRODUCTION MODE")
 
     if not scheduler.running:

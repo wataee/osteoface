@@ -5,6 +5,8 @@ from datetime import datetime
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
 from aiogram import Bot, Dispatcher, Router, F
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, CommandObject, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -24,7 +26,10 @@ from scheduler import *
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 
 dp = Dispatcher()
 router = Router()
@@ -470,6 +475,27 @@ async def handle_hochu(message: Message):
         asyncio.create_task(_doubt_upsell(tg_id))
 
 
+# ─── Кодовые слова (скрытые ветки) ───────────────────────────
+@router.message(F.text.lower().in_({"обучение", "обучение про", "про"}))
+async def handle_keyword_obuchenie(message: Message):
+    """Кодовое слово «обучение» — запускает ветку ОстеоФейс ПРО."""
+    tg_id = message.from_user.id
+    db.upsert_user(tg_id, "обучение", message.from_user.username, message.from_user.full_name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎓 Узнать про ОстеоФейс ПРО", url=PAY_URL_PRO)],
+        [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
+    ])
+    await message.answer(OBUCHENIE_KEYWORD_MSG, reply_markup=kb, parse_mode="HTML")
+
+
+@router.message(F.text.lower().in_({"икигай", "ikigai", "диагностика", "предназначение"}))
+async def handle_keyword_ikigai(message: Message):
+    """Кодовое слово «икигай» — запускает диагностику предназначения."""
+    tg_id = message.from_user.id
+    db.upsert_user(tg_id, "икигай", message.from_user.username, message.from_user.full_name)
+    await message.answer(IKIGAI_KEYWORD_MSG, reply_markup=kb_diag_pay(), parse_mode="HTML")
+
+
 async def _doubt_upsell(tg_id: int):
     delay = 10 if TEST_MODE else 1800
     await asyncio.sleep(delay)
@@ -603,7 +629,10 @@ async def cb_toggle_test(callback: CallbackQuery):
     global TEST_MODE
     TEST_MODE = not TEST_MODE
     setup_scheduler(bot, TEST_MODE)
-    await callback.message.edit_reply_markup(reply_markup=kb_admin_menu(TEST_MODE))
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb_admin_menu(TEST_MODE))
+    except Exception:
+        pass
     await callback.answer(f"Режим: {'🔴 ТЕСТ' if TEST_MODE else '🟢 БОЕВОЙ'}", show_alert=True)
 
 
@@ -617,11 +646,13 @@ async def cb_admin_stats(callback: CallbackQuery):
     by_tag = "\n".join(f"  • {tag}: {cnt}" for tag, cnt in s["by_tag"].items()) or "  нет"
     text = (
         "📊 <b>Статистика</b>\n\n"
-        f"👥 Всего: <b>{s['total']}</b>\n"
-        f"💰 Оплатили курс: <b>{s['paid']}</b>\n"
-        f"💎 Разборы оплачены: <b>{s['razbor_paid']}</b>\n"
-        f"🏆 VIP оплачен: <b>{s['vip_paid']}</b>\n"
-        f"🎯 Вебинар зарег: <b>{s['webinar_registered']}</b>\n"
+        f"👥 Всего пользователей: <b>{s['total']}</b>\n"
+        f"💰 Оплатили курс (49к): <b>{s['paid']}</b>\n"
+        f"💎 Разборы (3к): <b>{s['razbor_paid']}</b>\n"
+        f"🎯 Мини-протокол (7к): <b>{s['protocol_paid']}</b>\n"
+        f"🏆 VIP-сопровождение: <b>{s['vip_paid']}</b>\n"
+        f"🧬 Диагностика (икигай): <b>{s['diag_paid']}</b>\n"
+        f"🎓 Вебинар (зарег.): <b>{s['webinar_registered']}</b>\n"
         f"✅ Были на вебинаре: <b>{s['webinar_attended']}</b>\n"
         f"👆 Кликнули «Купить»: <b>{s['clicked_buy']}</b>\n\n"
         f"По веткам:\n{by_tag}"
@@ -1466,11 +1497,68 @@ async def payment_webhook_handler(request: web.Request) -> web.Response:
 # ══════════════════════════════════════════════════════════════
 async def main():
     db.init_db()
+    db.init_media_table()
     dp.include_router(router)
     setup_scheduler(bot, TEST_MODE)
+    await _upload_media_folder()
     await _pin_admin_panel()
     logger.info(f"Bot started. Mode: {'TEST' if TEST_MODE else 'PRODUCTION'}")
     await dp.start_polling(bot)
+
+
+async def _upload_media_folder():
+    """
+    При старте бота загружает все картинки из папки media/ в Telegram
+    и сохраняет file_id в БД. Повторно не загружает уже известные файлы.
+
+    Структура папки:
+        media/
+            oteki_result.jpg        — кейс отёки день 3
+            oteki_anatomy.jpg       — анатомия отёки день 4
+            podtyazhka_result.jpg   — кейс подтяжка день 3
+            webinar_result.jpg      — кейс пост-вебинар шаг 3
+            (любые другие .jpg/.png — загрузятся автоматически)
+    """
+    import os
+    media_dir = os.path.join(os.path.dirname(__file__), "media")
+    if not os.path.isdir(media_dir):
+        logger.info("[media] Папка media/ не найдена — пропускаем загрузку.")
+        return
+
+    ADMIN_UPLOAD_CHAT = ADMIN_USER_ID  # загружаем себе в ЛС
+
+    exts = {".jpg", ".jpeg", ".png", ".webp"}
+    files = [f for f in os.listdir(media_dir)
+             if os.path.splitext(f)[1].lower() in exts]
+
+    if not files:
+        logger.info("[media] Папка media/ пуста.")
+        return
+
+    uploaded, skipped = 0, 0
+    for filename in sorted(files):
+        existing = db.get_media_file_id(filename)
+        if existing:
+            skipped += 1
+            continue
+        filepath = os.path.join(media_dir, filename)
+        try:
+            from aiogram.types import FSInputFile
+            photo = FSInputFile(filepath, filename=filename)
+            msg = await bot.send_photo(
+                chat_id=ADMIN_UPLOAD_CHAT,
+                photo=photo,
+                caption=f"📁 <b>Медиа загружено:</b> {filename}"
+            )
+            file_id = msg.photo[-1].file_id
+            db.set_media_file_id(filename, file_id)
+            logger.info(f"[media] Загружено: {filename} → {file_id[:20]}...")
+            uploaded += 1
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.error(f"[media] Ошибка загрузки {filename}: {e}")
+
+    logger.info(f"[media] Готово: загружено {uploaded}, пропущено {skipped} из {len(files)}.")
 
 
 @router.message(F.pinned_message, F.chat.id == ADMIN_GROUP_ID)

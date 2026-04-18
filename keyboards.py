@@ -355,10 +355,22 @@ def kb_admin_broadcast_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Всем", callback_data="broadcast:all")],
         [InlineKeyboardButton(text="💧 Отёки", callback_data="broadcast:отёки")],
+        [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="broadcast:асимметрия")],
+        [InlineKeyboardButton(text="📐 Овал", callback_data="broadcast:овал")],
+        [InlineKeyboardButton(text="💥 Боль", callback_data="broadcast:боль")],
         [InlineKeyboardButton(text="✨ Подтяжка", callback_data="broadcast:подтяжка")],
-        [InlineKeyboardButton(text="💰 Обучение", callback_data="broadcast:обучение")],
+        [InlineKeyboardButton(text="💰 Обучение (ПРО)", callback_data="broadcast:обучение")],
         [InlineKeyboardButton(text="🎯 Зарег. на вебинар", callback_data="broadcast:webinar_reg")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin:panel")],
+    ])
+
+
+def kb_course_pay_direct(tg_id: int) -> InlineKeyboardMarkup:
+    """Прямая кнопка оплаты курса 49 000₽ (из апселла после 7000₽)"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎓 Хочу на курс OsteoFace — 49 000 ₽",
+                              url=f"{PAY_URL_SELF}?tg_id={tg_id}")],
+        [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
     ])
 
 

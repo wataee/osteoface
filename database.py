@@ -69,7 +69,9 @@ def init_db():
                 diag_paid INTEGER DEFAULT 0,
                 diag_remind_1h_sent INTEGER DEFAULT 0,
                 diag_remind_24h_sent INTEGER DEFAULT 0,
-                buy_reminder_step INTEGER DEFAULT 0
+                buy_reminder_step INTEGER DEFAULT 0,
+                silence_triggered INTEGER DEFAULT 0,
+                last_active DATETIME
             );
 
             CREATE TABLE IF NOT EXISTS webinar_settings (
@@ -107,6 +109,8 @@ def init_db():
             ("protocol_pay_click_time", "DATETIME"),
             ("protocol_remind_step", "INTEGER DEFAULT 0"),
             ("buy_reminder_step", "INTEGER DEFAULT 0"),
+            ("silence_triggered", "INTEGER DEFAULT 0"),
+            ("last_active", "DATETIME"),
         ])
 
         conn.execute(
@@ -453,12 +457,37 @@ def get_stats() -> dict:
         web_att = conn.execute('SELECT COUNT(*) FROM users WHERE webinar_attended = 1').fetchone()[0]
         clicked_buy = conn.execute('SELECT COUNT(*) FROM users WHERE clicked_buy = 1').fetchone()[0]
         razbor_paid = conn.execute('SELECT COUNT(*) FROM users WHERE razbor_paid = 1').fetchone()[0]
+        protocol_paid = conn.execute('SELECT COUNT(*) FROM users WHERE protocol_paid = 1').fetchone()[0]
         vip_paid = conn.execute('SELECT COUNT(*) FROM users WHERE vip_paid = 1').fetchone()[0]
         diag_paid = conn.execute('SELECT COUNT(*) FROM users WHERE diag_paid = 1').fetchone()[0]
         by_tag = {row['tag']: row['cnt'] for row in conn.execute('SELECT tag, COUNT(*) as cnt FROM users GROUP BY tag').fetchall()}
     return dict(total=total, paid=paid, webinar_registered=web_reg, webinar_attended=web_att,
-                clicked_buy=clicked_buy, razbor_paid=razbor_paid, vip_paid=vip_paid,
-                diag_paid=diag_paid, by_tag=by_tag)
+                clicked_buy=clicked_buy, razbor_paid=razbor_paid, protocol_paid=protocol_paid,
+                vip_paid=vip_paid, diag_paid=diag_paid, by_tag=by_tag)
+
+
+# ══════════════════════════════════════════════════════════════
+#  МОЛЧУНЫ (72Ч)
+# ══════════════════════════════════════════════════════════════
+def get_silent_72h_users():
+    """Пользователи, которые зарегистрировались 72+ ч назад, ничего не купили и ещё не получали триггер."""
+    with get_conn() as conn:
+        return conn.execute('''
+            SELECT * FROM users
+            WHERE silence_triggered = 0
+              AND funnel_stopped = 0
+              AND is_paid = 0
+              AND razbor_paid = 0
+              AND protocol_paid = 0
+              AND vip_paid = 0
+              AND join_date IS NOT NULL
+              AND join_date < datetime('now', '-72 hours')
+        ''').fetchall()
+
+
+def mark_silence_triggered(tg_id: int):
+    with get_conn() as conn:
+        conn.execute('UPDATE users SET silence_triggered = 1 WHERE tg_id = ?', (tg_id,))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -504,3 +533,39 @@ def clear_all_data():
         conn.execute('DROP TABLE IF EXISTS funnel_content')
         conn.execute('DROP TABLE IF EXISTS bot_settings')
     init_db()
+
+# ══════════════════════════════════════════════════════════════
+#  МЕДИА FILE_ID (авто-загрузка из папки media/)
+# ══════════════════════════════════════════════════════════════
+def init_media_table():
+    with get_conn() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS media_file_ids (
+                filename TEXT PRIMARY KEY,
+                file_id  TEXT NOT NULL,
+                uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+
+def get_media_file_id(filename: str) -> str:
+    """Вернуть сохранённый file_id по имени файла. Пустая строка если нет."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                'SELECT file_id FROM media_file_ids WHERE filename = ?', (filename,)
+            ).fetchone()
+            return row['file_id'] if row else ""
+    except Exception:
+        return ""
+
+
+def set_media_file_id(filename: str, file_id: str):
+    """Сохранить или обновить file_id для файла."""
+    with get_conn() as conn:
+        conn.execute('''
+            INSERT INTO media_file_ids (filename, file_id)
+            VALUES (?, ?)
+            ON CONFLICT(filename) DO UPDATE SET file_id = excluded.file_id,
+                                                uploaded_at = CURRENT_TIMESTAMP
+        ''', (filename, file_id))
