@@ -177,7 +177,12 @@ async def cb_branch(callback: CallbackQuery):
     if branch == "razbor":
         await callback.message.answer(PROBLEM_ASK, reply_markup=kb_problems())
     elif branch == "webinar":
-        await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
+        webinar = db.get_webinar()
+        if webinar and webinar["is_active"]:
+            await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
+        else:
+            # Вместо тупика сразу даем запись мастер-класса
+            await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=kb_webinar_link(RUTUBE_FREE_1))
     await callback.answer()
 
 

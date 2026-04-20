@@ -554,35 +554,37 @@ async def job_reminders(bot: Bot, is_test: bool = False):
     for user in users:
         tg_id = user["tg_id"]
 
-        # 1. Дожим разбора (3 000 ₽) — 6ч, 24ч, 48ч
-        if user["razbor_pay_click_time"] and not user["razbor_paid"]:
-            try:
-                click_time = datetime.strptime(user["razbor_pay_click_time"], '%Y-%m-%d %H:%M:%S')
-                diff = (now - click_time).total_seconds()
-                if is_test:
-                    diff_minutes = diff / 60
-                    cond_6h = 6 <= diff_minutes < 24
-                    cond_24h = 24 <= diff_minutes < 48
-                    cond_48h = 48 <= diff_minutes
-                else:
-                    diff_hours = diff / 3600
-                    cond_6h = 6 <= diff_hours < 24
-                    cond_24h = 24 <= diff_hours < 48
-                    cond_48h = 48 <= diff_hours
+       # 1. Дожим разбора (3 000 ₽) — 6ч, 24ч, 48ч
+    if user["razbor_pay_click_time"] and not user["razbor_paid"]:
+        try:
+            click_time = datetime.strptime(user["razbor_pay_click_time"], '%Y-%m-%d %H:%M:%S')
+            diff = (now - click_time).total_seconds()
+            if is_test:
+                diff_minutes = diff / 60
+                cond_6h = 6 <= diff_minutes < 24
+                cond_24h = 24 <= diff_minutes < 48
+                cond_48h = 48 <= diff_minutes
+            else:
+                diff_hours = diff / 3600
+                cond_6h = 6 <= diff_hours < 24
+                cond_24h = 24 <= diff_hours < 48
+                cond_48h = 48 <= diff_hours
 
-                step = user.get("razbor_remind_step", 0)
+            step = user.get("razbor_remind_step", 0)
 
-                if step == 0 and cond_6h:
-                    await bot.send_message(tg_id, RAZBOR_REMIND_6H, reply_markup=kb_razbor_personal_pay(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_remind_step", 1)
-                elif step == 1 and cond_24h:
-                    await bot.send_message(tg_id, RAZBOR_REMIND_24H, reply_markup=kb_razbor_personal_pay(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_remind_step", 2)
-                elif step == 2 and cond_48h:
-                    await bot.send_message(tg_id, RAZBOR_REMIND_48H, reply_markup=kb_razbor_personal_pay(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_remind_step", 3)
-            except Exception as e:
-                logger.error(f"[razbor_reminder] user {tg_id}: {e}")
+            if step == 0 and cond_6h:
+                await bot.send_message(tg_id, RAZBOR_REMIND_6H, reply_markup=kb_razbor_personal_pay(tg_id))
+                db.set_reminder_step(tg_id, "razbor_remind_step", 1)
+            elif step == 1 and cond_24h:
+                await bot.send_message(tg_id, RAZBOR_REMIND_24H, reply_markup=kb_razbor_personal_pay(tg_id))
+                db.set_reminder_step(tg_id, "razbor_remind_step", 2)
+            elif step == 2 and cond_48h:
+                # Финальное усиление боли
+                await bot.send_message(tg_id, "⏳ Твоё лицо продолжает меняться каждый день. Гравитация не берет выходных. Жду тебя на разборе, чтобы остановить этот процесс 👇", 
+                                    reply_markup=kb_razbor_personal_pay(tg_id))
+                db.set_reminder_step(tg_id, "razbor_remind_step", 3)
+        except Exception as e:
+            logger.error(f"[razbor_reminder] user {tg_id}: {e}")
 
         # 2. Дожим мини-протокола (7 000 ₽) — 1ч, 24ч
         if user["protocol_pay_click_time"] and not user["protocol_paid"]:

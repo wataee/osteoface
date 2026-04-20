@@ -569,3 +569,11 @@ def set_media_file_id(filename: str, file_id: str):
             ON CONFLICT(filename) DO UPDATE SET file_id = excluded.file_id,
                                                 uploaded_at = CURRENT_TIMESTAMP
         ''', (filename, file_id))
+
+def stop_all_reminders_for_product(tg_id: int, product_prefix: str):
+    """
+    Пример: product_prefix = 'razbor' обнулит дожимы по разбору, 
+    чтобы они не мешали дожимам по курсу.
+    """
+    with get_conn() as conn:
+        conn.execute(f'UPDATE users SET {product_prefix}_remind_step = 10 WHERE tg_id = ?', (tg_id,))
