@@ -182,7 +182,16 @@ async def cb_branch(callback: CallbackQuery):
             await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
         else:
             # Вместо тупика сразу даем запись мастер-класса
-            await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=kb_webinar_link(RUTUBE_FREE_1))
+            await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎥 Смотреть запись", url=RUTUBE_FREE_1)]]))
+            # Дополнительно предлагаем разбор после просмотра
+            await asyncio.sleep(2)
+            await callback.message.answer(
+                "Теперь важно понять, что происходит именно с вашим лицом.\n"
+                "Для этого я делаю персональный разбор, где показываю ваши блоки и даю точный протокол.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
+                ]])
+            )
     await callback.answer()
 
 
@@ -190,44 +199,21 @@ async def cb_branch(callback: CallbackQuery):
 async def cb_problem(callback: CallbackQuery):
     tg_id = callback.from_user.id
     problem_key = callback.data.split(":")[1]
-    
-    reply_text = PROBLEM_REPLIES.get(problem_key, "У тебя типичная ситуация, которую я вижу у 90% людей.")
-    await callback.message.answer(reply_text)
-    
+    tag = {"otoki": "отёки", "asimmetriya": "асимметрия", "oval": "овал", "bol": "боль"}.get(problem_key)
+    db.upsert_user(tg_id, tag, callback.from_user.username, callback.from_user.full_name)
+    await callback.message.answer(PROBLEM_REPLIES.get(problem_key, ""))
     await asyncio.sleep(1)
-    
-    await callback.message.answer(RAZBOR_OFFER, reply_markup=kb_razbor_pay(tg_id))
+    video = VIDEO_OTEKI if problem_key == "otoki" else VIDEO_PODTYAZHKA
+    await callback.message.answer_video(video=video)
+    await asyncio.sleep(1)
+    await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")]]))
     await callback.answer()
 
-
-@router.callback_query(F.data.startswith("tag:"))
-async def cb_tag_select(callback: CallbackQuery, state: FSMContext):
-    choice = callback.data.split(":")[1]
-    tag = TAG_MAP.get(choice)
-    if not tag:
-        await callback.answer("Ветка не найдена")
-        return
-    db.upsert_user(callback.from_user.id, tag, callback.from_user.username, callback.from_user.full_name)
-    data = DAY0.get(tag)
-    if not data:
-        await callback.message.answer("Информация по этой ветке временно недоступна.")
-        await callback.answer()
-        return
-    await callback.message.answer(data.get("text", "Разберём вашу ситуацию."), parse_mode="HTML")
-    video_id = data.get("video")
-    if video_id:
-        try:
-            caption = VIDEO_CAPTIONS.get(tag, "")
-            await callback.message.answer_video(video=video_id, caption=caption)
-            await asyncio.sleep(2)
-        except Exception as e:
-            logger.error(f"Video send error: {e}")
-    await asyncio.sleep(1)
-    await callback.message.answer(
-        "📸 <b>Пришлите фото вашего лица анфас прямо сюда в чат.</b>\n\n"
-        "Желательно без масок и фильтров, при хорошем освещении. Можно добавить фото в профиль (сбоку)."
-    )
-    await state.set_state(RazborState.waiting_for_photo)
+@router.callback_query(F.data == "razbor_details")
+async def cb_razbor_details(callback: CallbackQuery):
+    tg_id = callback.from_user.id
+    db.mark_razbor_pay_clicked(tg_id)
+    await callback.message.answer(RAZBOR_PAY_INFO, reply_markup=kb_razbor_pay(tg_id))
     await callback.answer()
 
 

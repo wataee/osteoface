@@ -110,7 +110,7 @@ def init_db():
             ("protocol_remind_step", "INTEGER DEFAULT 0"),
             ("buy_reminder_step", "INTEGER DEFAULT 0"),
             ("silence_triggered", "INTEGER DEFAULT 0"),
-            ("last_active", "DATETIME"),
+            ("last_active", "DATETIME"),             ("razbor_upsell_7000_step", "INTEGER DEFAULT 0"),
         ])
 
         conn.execute(

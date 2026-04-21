@@ -43,9 +43,9 @@ def kb_persistent_main() -> ReplyKeyboardMarkup:
 def kb_problems() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💧 Отёки", callback_data="problem:otoki")],
-        [InlineKeyboardButton(text="📐 Овал", callback_data="problem:oval")],
-        [InlineKeyboardButton(text="⚡️ Морщины", callback_data="problem:morchini")],
-        [InlineKeyboardButton(text="🌪 Всё сразу", callback_data="problem:all")],
+        [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="problem:asimmetriya")],
+        [InlineKeyboardButton(text="📐 Овал лица", callback_data="problem:oval")],
+        [InlineKeyboardButton(text="💥 Боль", callback_data="problem:bol")],
     ])
 
 
@@ -167,8 +167,8 @@ def kb_webinar_link(link: str) -> InlineKeyboardMarkup:
 
 
 def kb_post_webinar() -> InlineKeyboardMarkup:
-    """После вебинара"""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")],
         [InlineKeyboardButton(text="📝 Записаться на курс", callback_data="course_landing_info")],
         [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
     ])
