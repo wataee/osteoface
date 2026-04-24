@@ -180,32 +180,47 @@ async def job_daily_post_webinar(bot: Bot, is_test: bool = False):
             elapsed = (now - start_dt).total_seconds()
             day = int(elapsed / 30) if is_test else int(elapsed / 86400)
 
-            series = POST_ATTENDED if attended else POST_NOT_ATTENDED
-            max_steps = len(series)
-
-            if step >= max_steps or day < step + 1:
+            if day < step + 1:
                 continue
 
-            entry = series.get(step + 1)
-            if isinstance(entry, dict):
-                text = entry.get("text", "")
-                photo_id = entry.get("photo")
-                if photo_id:
-                    try:
-                        await bot.send_photo(
-                            chat_id=tg_id, photo=photo_id,
-                            caption=text, reply_markup=kb_post_webinar(),
-                            parse_mode="HTML"
-                        )
-                        db.increment_post_webinar_step(tg_id)
-                        continue
-                    except Exception:
-                        pass
-            else:
-                text = entry or ""
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-            if text:
-                await safe_send(bot, tg_id, text, kb_post_webinar())
+            if step == 0:
+                # День 1 после вебинара: запись + оффер курса
+                if attended:
+                    text = WEBINAR_POST_ATTENDED
+                else:
+                    text = WEBINAR_POST_NOT_ATTENDED
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🎥 Смотреть запись", url=RUTUBE_FREE_1)],
+                    [InlineKeyboardButton(text="📝 Узнать о курсе", callback_data="course_landing_info")],
+                ])
+                await safe_send(bot, tg_id, text, kb)
+                db.increment_post_webinar_step(tg_id)
+
+            elif step == 1:
+                # Дожим 1
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="💬 Написать мастеру", callback_data="ask_question")],
+                    [InlineKeyboardButton(text="📝 Перейти к программе", callback_data="course_landing_info")],
+                ])
+                await safe_send(bot, tg_id, WEBINAR_COURSE_PUSH_1, kb)
+                db.increment_post_webinar_step(tg_id)
+
+            elif step == 2:
+                # Дожим 2 — срочность
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📝 Перейти к программе", callback_data="course_landing_info")],
+                ])
+                await safe_send(bot, tg_id, WEBINAR_COURSE_PUSH_2, kb)
+                db.increment_post_webinar_step(tg_id)
+
+            elif step == 3:
+                # Финальный дожим
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📝 Начать сегодня", callback_data="course_landing_info")],
+                ])
+                await safe_send(bot, tg_id, WEBINAR_COURSE_PUSH_3, kb)
                 db.increment_post_webinar_step(tg_id)
 
         except Exception as e:
@@ -238,37 +253,35 @@ async def job_webinar_reminders(bot: Bot, is_test: bool = False):
         c15m = 0 < sec_left <= 1800
         deact = sec_left <= -3600
 
-    all_users = [u for u in db.get_all_users() if not u["is_paid"]]
-    if not all_users:
-        return
-
-    link = webinar["webinar_link"]
-
-    def kb_for(u):
-        return kb_webinar_join() if u["webinar_registered"] else kb_webinar_register()
+    # Напоминания ТОЛЬКО зарегистрированным
+    registered_users = [u for u in db.get_all_users() if u["webinar_registered"] and not u["is_paid"]]
+    link = webinar["webinar_link"] or ""
 
     if not webinar["reminder_1d_sent"] and c1d:
-        d = webinar_dt.strftime("%d.%m.%Y")
-        t = webinar_dt.strftime("%H:%M")
-        text = WEBINAR_REMIND_1D.format(date=d, time=t)
-        for u in all_users:
-            await safe_send(bot, u["tg_id"], text, kb_for(u))
+        for u in registered_users:
+            await safe_send(bot, u["tg_id"], WEBINAR_REMIND_1D)
         db.set_webinar_reminder_sent("1d")
 
     elif not webinar["reminder_2h_sent"] and c2h:
-        for u in all_users:
-            await safe_send(bot, u["tg_id"], WEBINAR_REMIND_2H, kb_for(u))
+        for u in registered_users:
+            await safe_send(bot, u["tg_id"], WEBINAR_REMIND_2H)
         db.set_webinar_reminder_sent("2h")
 
     elif not webinar["reminder_15m_sent"] and c15m:
-        for u in all_users:
-            await safe_send(bot, u["tg_id"], WEBINAR_REMIND_15M, kb_for(u))
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        for u in registered_users:
+            kb = None
+            if link:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🚀 Перейти на вебинар", url=link)
+                ]])
+            await safe_send(bot, u["tg_id"], WEBINAR_REMIND_15M, kb)
         db.set_webinar_reminder_sent("15m")
 
     if deact:
-        for u in all_users:
-            if u["webinar_registered"]:
-                db.start_post_webinar(u["tg_id"])
+        all_registered = [u for u in db.get_all_users() if u["webinar_registered"]]
+        for u in all_registered:
+            db.start_post_webinar(u["tg_id"])
         db.deactivate_webinar()
 
 

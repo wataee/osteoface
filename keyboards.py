@@ -146,9 +146,9 @@ def kb_after_razbor_paid() -> InlineKeyboardMarkup:
 # ════════════════════════════════════════════════════════════
 
 def kb_webinar_register() -> InlineKeyboardMarkup:
-    """Запись на вебинар"""
+    """Запись на вебинар — всегда показываем, независимо от даты"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎯 Записаться на вебинар", callback_data="webinar:register")],
+        [InlineKeyboardButton(text="🎓 Записаться на вебинар", callback_data="webinar:register")],
     ])
 
 

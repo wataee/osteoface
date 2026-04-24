@@ -64,6 +64,11 @@ class AskQuestionState(StatesGroup):
     waiting_for_question = State()
 
 
+class WebinarContactState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_phone = State()
+
+
 class WebinarSetupState(StatesGroup):
     waiting_for_text = State()
     waiting_for_link = State()
@@ -177,21 +182,8 @@ async def cb_branch(callback: CallbackQuery):
     if branch == "razbor":
         await callback.message.answer(PROBLEM_ASK, reply_markup=kb_problems())
     elif branch == "webinar":
-        webinar = db.get_webinar()
-        if webinar and webinar["is_active"]:
-            await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
-        else:
-            # Вместо тупика сразу даем запись мастер-класса
-            await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎥 Смотреть запись", url=RUTUBE_FREE_1)]]))
-            # Дополнительно предлагаем разбор после просмотра
-            await asyncio.sleep(2)
-            await callback.message.answer(
-                "Теперь важно понять, что происходит именно с вашим лицом.\n"
-                "Для этого я делаю персональный разбор, где показываю ваши блоки и даю точный протокол.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
-                ]])
-            )
+        # Всегда показываем вебинарный оффер — без упоминания "не провожу"
+        await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
     await callback.answer()
 
 
@@ -219,7 +211,7 @@ async def cb_razbor_details(callback: CallbackQuery):
 
 @router.callback_query(F.data == "fast_solve")
 async def cb_fast_solve(callback: CallbackQuery):
-    await callback.message.answer("Выберите, что вас беспокоит:", reply_markup=kb_problem_selection())
+    await callback.message.answer("Выберите, что вас беспокоит:", reply_markup=kb_problems())
     await callback.answer()
 
 
@@ -528,21 +520,70 @@ async def receive_question(message: Message, state: FSMContext):
 #  ВЕБИНАР
 # ──────────────────────────────────────────────────────────────
 @router.callback_query(F.data == "webinar:register")
-async def cb_webinar_register(callback: CallbackQuery):
-    webinar = db.get_webinar()
-    if not webinar or not webinar["is_active"]:
-        await callback.message.answer(WEBINAR_NOT_ACTIVE, reply_markup=kb_channel())
-        await callback.answer()
-        return
+async def cb_webinar_register(callback: CallbackQuery, state: FSMContext):
+    tg_id = callback.from_user.id
+    u = db.get_user(tg_id)
 
-    u = db.get_user(callback.from_user.id)
     if u and u["webinar_registered"]:
         await callback.answer("✅ Вы уже зарегистрированы!", show_alert=True)
         return
 
-    db.mark_webinar_registered(callback.from_user.id)
-    await callback.message.answer(WEBINAR_REGISTERED_OK)
-    await callback.answer("✅ Зарегистрировано!")
+    # Начинаем сбор данных: имя → телефон
+    await callback.message.answer(WEBINAR_COLLECT_NAME)
+    await state.set_state(WebinarContactState.waiting_for_name)
+    await callback.answer()
+
+
+@router.message(WebinarContactState.waiting_for_name)
+async def webinar_collect_name(message: Message, state: FSMContext):
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("Напиши своё имя 👇")
+        return
+    await state.update_data(webinar_name=name)
+    await message.answer(WEBINAR_COLLECT_PHONE)
+    await state.set_state(WebinarContactState.waiting_for_phone)
+
+
+@router.message(WebinarContactState.waiting_for_phone)
+async def webinar_collect_phone(message: Message, state: FSMContext):
+    tg_id = message.from_user.id
+    phone = (message.text or "").strip()
+    if len(phone) < 5:
+        await message.answer("Напиши номер телефона 👇")
+        return
+
+    data = await state.get_data()
+    name = data.get("webinar_name", message.from_user.full_name)
+    await state.clear()
+
+    # Сохраняем пользователя с тегом webinar_reg
+    db.upsert_user(tg_id, "webinar_reg", message.from_user.username, name)
+    db.update_phone(tg_id, phone)
+    db.mark_webinar_registered(tg_id)
+
+    await message.answer(WEBINAR_COLLECT_DONE)
+
+    # Уведомляем администратора
+    webinar = db.get_webinar()
+    date_str = webinar["webinar_date"] if webinar and webinar["webinar_date"] else "дата не назначена"
+    admin_text = (
+        f"🎓 <b>Новая запись на вебинар!</b>\n\n"
+        f"👤 {name} (@{message.from_user.username})\n"
+        f"📱 {phone}\n"
+        f"🆔 <code>{tg_id}</code>\n"
+        f"📅 Вебинар: {date_str}"
+    )
+    try:
+        await bot.send_message(
+            ADMIN_GROUP_ID, admin_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="💬 Написать", url=f"tg://user?id={tg_id}")
+            ]]),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"[webinar_register] admin notify: {e}")
 
 
 # ══════════════════════════════════════════════════════════════

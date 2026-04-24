@@ -374,7 +374,9 @@ def increment_post_webinar_step(tg_id: int):
 
 def get_webinar_registered():
     with get_conn() as conn:
-        return conn.execute('SELECT * FROM users WHERE webinar_registered = 1 AND is_paid = 0').fetchall()
+        return conn.execute(
+            'SELECT * FROM users WHERE webinar_registered = 1 OR tag = "webinar_reg" ORDER BY id DESC'
+        ).fetchall()
 
 
 def get_post_webinar_users():
