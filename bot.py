@@ -382,6 +382,15 @@ async def receive_razbor_photo(message: Message, state: FSMContext):
         InlineKeyboardButton(text="💎 Персональный разбор — 3 000 ₽", callback_data="buy_razbor_personal")
     ]])
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_3, reply_markup=kb)
+    # Апсэлл расширенного разбора 7000
+    await asyncio.sleep(1)
+    kb_upsell = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="🚀 Расширенный разбор — 7 000 ₽",
+            callback_data="pay_protocol_click"
+        )
+    ]])
+    await bot.send_message(tg_id, UPSELL_7000_IMMEDIATE, reply_markup=kb_upsell)
     db.mark_razbor_auto_replied(tg_id)
     asyncio.create_task(_fast_followup_razbor(tg_id))
 
