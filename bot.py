@@ -114,6 +114,17 @@ class AdminWebinarState(StatesGroup):
     waiting_for_link = State()
 
 
+# --- НОВЫЕ СОСТОЯНИЯ ДЛЯ ЗАЯВОК И РАССЫЛКИ ПО ЛИСТУ ОЖИДАНИЯ ---
+class EnrollmentState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_phone = State()
+
+
+class AdminBroadcastWLState(StatesGroup):
+    waiting_for_text = State()
+    confirm = State()
+
+
 # ══════════════════════════════════════════════════════════════
 #  УТИЛИТЫ
 # ══════════════════════════════════════════════════════════════
@@ -191,14 +202,30 @@ async def cb_branch(callback: CallbackQuery):
 async def cb_problem(callback: CallbackQuery):
     tg_id = callback.from_user.id
     problem_key = callback.data.split(":")[1]
-    tag = {"otoki": "отёки", "asimmetriya": "асимметрия", "oval": "овал", "bol": "боль"}.get(problem_key)
+    
+    tags_mapping = {
+        "otoki": "отёки", 
+        "asimmetriya": "асимметрия", 
+        "oval": "подтяжка", 
+        "bol": "боль",
+        "nosogubki": "носогубки",
+        "ustalost": "усталость"
+    }
+    tag = tags_mapping.get(problem_key, "отёки")
+    
     db.upsert_user(tg_id, tag, callback.from_user.username, callback.from_user.full_name)
+    db.update_funnel_stage(tg_id, "problem_chosen")
+    
     await callback.message.answer(PROBLEM_REPLIES.get(problem_key, ""))
     await asyncio.sleep(1)
-    video = VIDEO_OTEKI if problem_key == "otoki" else VIDEO_PODTYAZHKA
+    
+    video = VIDEO_OTEKI if problem_key in ("otoki", "ustalost") else VIDEO_PODTYAZHKA
     await callback.message.answer_video(video=video)
+    db.update_funnel_stage(tg_id, "video_shown")
     await asyncio.sleep(1)
+    
     await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")]]))
+    db.update_funnel_stage(tg_id, "prelude_shown")
     await callback.answer()
 
 @router.callback_query(F.data == "razbor_details")
@@ -702,9 +729,18 @@ async def cb_admin_stats(callback: CallbackQuery):
     await callback.answer()
 
 
-# ──────────────────────────────────────────────────────────────
-#  УПРАВЛЕНИЕ ВЕБИНАРАМИ
-# ──────────────────────────────────────────────────────────────
+# ─── Аналитика воронки ───────────────────────────────────────
+@router.callback_query(F.data == "admin:funnel_stats")
+async def cb_funnel_stats(callback: CallbackQuery):
+    if not is_admin(callback.message.chat.id, callback.from_user.id):
+        return
+    stats = db.get_funnel_analytics()
+    text = build_funnel_stats_text(stats)
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
+
+
+# ─── Управление вебинарами ───────────────────────────────────
 @router.message(AdminWebinarState.waiting_for_link)
 async def admin_webinar_link(message: Message, state: FSMContext):
     link = message.text.strip()
@@ -1471,37 +1507,117 @@ async def broadcast_cancel(callback: CallbackQuery, state: FSMContext):
 
 
 # ──────────────────────────────────────────────────────────────
-#  ОТВЕТ АДМИНИСТРАТОРА
+#  ЗАЯВКИ НА ОБУЧЕНИЕ / ПРАКТИКИ
 # ──────────────────────────────────────────────────────────────
-@router.callback_query(F.data.startswith("admin_reply:"))
-async def cb_admin_reply_btn(callback: CallbackQuery, state: FSMContext):
-    if not is_admin(callback.message.chat.id, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
-        return
-    target_id = int(callback.data.split(":")[1])
-    await state.update_data(target_id=target_id)
-    await state.set_state(AdminReplyState.waiting_for_reply)
-    await callback.message.answer(
-        f"🎤 Ответ пользователю ID {target_id}.\n"
-        "Отправь текст, голосовое, видео или кружок:"
-    )
+@router.callback_query(F.data.startswith("enroll:"))
+async def cb_enroll_start(callback: CallbackQuery, state: FSMContext):
+    direction = callback.data.split(":")[1]
+    await state.update_data(enroll_dir=direction)
+    await state.set_state(EnrollmentState.waiting_for_name)
+    await callback.message.answer(ENROLLMENT_COLLECT_NAME, parse_mode="HTML")
     await callback.answer()
 
 
-@router.message(AdminReplyState.waiting_for_reply)
-async def admin_send_reply(message: Message, state: FSMContext):
+@router.message(EnrollmentState.waiting_for_name)
+async def enroll_name(message: Message, state: FSMContext):
+    await state.update_data(enroll_name=message.text)
+    await state.set_state(EnrollmentState.waiting_for_phone)
+    await message.answer(ENROLLMENT_COLLECT_PHONE, parse_mode="HTML")
+
+
+@router.message(EnrollmentState.waiting_for_phone)
+async def enroll_phone(message: Message, state: FSMContext):
     data = await state.get_data()
-    target_id = data.get("target_id")
-    if not target_id:
-        await state.clear()
-        return
-    try:
-        await bot.send_message(target_id, "📩 Ответ от мастера:")
-        await message.copy_to(chat_id=target_id)
-        await message.answer("✅ Ответ отправлен!")
-    except Exception as e:
-        await message.answer(f"❌ Ошибка: {e}")
+    direction = data.get("enroll_dir")
+    name = data.get("enroll_name")
+    phone = message.text
+    user = message.from_user
+
     await state.clear()
+    db.save_enrollment_request(user.id, user.username, name, phone, direction)
+    await message.answer(ENROLLMENT_DONE, parse_mode="HTML")
+
+    dir_name = ENROLLMENT_DIRECTIONS.get(direction, direction)
+    admin_text = f"🔥 <b>Новая заявка на обучение/практику!</b>\n\nНаправление: {dir_name}\nИмя: {name}\nТелефон: {phone}\nTG: @{user.username} (<code>{user.id}</code>)"
+    await bot.send_message(ADMIN_GROUP_ID, admin_text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "admin:enrollments")
+async def cb_admin_enrollments(callback: CallbackQuery):
+    if not is_admin(callback.message.chat.id, callback.from_user.id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    requests = db.get_enrollment_requests()
+    if not requests:
+        await callback.message.answer("📋 Заявок на обучение пока нет.")
+        await callback.answer()
+        return
+    text = "📋 <b>Заявки на обучение и практики</b>\n\n"
+    for req in requests:
+        dir_name = ENROLLMENT_DIRECTIONS.get(req["direction"], req["direction"])
+        text += f"• {req['full_name']} (@{req['username']}) — {dir_name}\n   📞 {req['phone']}\n"
+    await callback.message.answer(text, parse_mode="HTML")
+    await callback.answer()
+
+
+# ──────────────────────────────────────────────────────────────
+#  ЛИСТ ОЖИДАНИЯ ВЕБИНАРА
+# ──────────────────────────────────────────────────────────────
+@router.callback_query(F.data == "webinar:waiting_list")
+async def cb_webinar_wl(callback: CallbackQuery):
+    user = callback.from_user
+    db.add_to_webinar_waiting_list(user.id, user.username, user.full_name, "")
+    await callback.message.answer(WEBINAR_WAITING_LIST_DONE, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin:broadcast_waiting_list")
+async def cb_admin_broadcast_wl(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.message.chat.id, callback.from_user.id):
+        return
+    await state.set_state(AdminBroadcastWLState.waiting_for_text)
+    await callback.message.answer("📝 Отправьте текст для рассылки по листу ожидания вебинара:", parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AdminBroadcastWLState.waiting_for_text)
+async def bcast_wl_text(message: Message, state: FSMContext):
+    await state.update_data(bcast_wl_text=message.text)
+    await state.set_state(AdminBroadcastWLState.confirm)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить", callback_data="bcast_wl_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="bcast_wl_cancel")]
+    ])
+    await message.answer(f"📋 Предпросмотр:\n\n{message.text}\n\nРазослать всем в листе ожидания?", reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "bcast_wl_confirm")
+async def bcast_wl_confirm(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.message.chat.id, callback.from_user.id):
+        return
+    data = await state.get_data()
+    text = data.get("bcast_wl_text", "")
+    await state.clear()
+
+    users = db.get_webinar_waiting_list()
+    sent = 0
+    for u in users:
+        try:
+            await bot.send_message(u["tg_id"], text)
+            sent += 1
+            await asyncio.sleep(0.05)
+        except:
+            pass
+
+    await callback.message.answer(f"✅ Разослано {sent} пользователям из листа ожидания.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bcast_wl_cancel")
+async def bcast_wl_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.answer("❌ Отменено.")
+    await callback.answer()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1608,6 +1724,7 @@ async def delete_pin_notification(message: Message):
         await message.delete()
     except Exception:
         pass
+
 
 if __name__ == "__main__":
     asyncio.run(main())
