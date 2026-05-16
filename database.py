@@ -71,7 +71,11 @@ def init_db():
                 diag_remind_24h_sent INTEGER DEFAULT 0,
                 buy_reminder_step INTEGER DEFAULT 0,
                 silence_triggered INTEGER DEFAULT 0,
-                last_active DATETIME
+                last_active DATETIME,
+                razbor_upsell_7000_step INTEGER DEFAULT 0,
+                -- [НОВОЕ] Аналитика по этапам воронки
+                funnel_stage TEXT DEFAULT "start",
+                funnel_stage_updated DATETIME
             );
 
             CREATE TABLE IF NOT EXISTS webinar_settings (
@@ -101,6 +105,29 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT DEFAULT ""
             );
+
+            -- [НОВОЕ] Заявки на обучение и практики
+            CREATE TABLE IF NOT EXISTS enrollment_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                username TEXT,
+                full_name TEXT,
+                phone TEXT,
+                direction TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            -- [НОВОЕ] Список ожидания вебинара (отдельно от webinar_registered)
+            -- webinar_registered в таблице users используется для ТЕКУЩЕГО вебинара.
+            -- waiting_list — это постоянный список желающих попасть на ЛЮБОЙ вебинар.
+            CREATE TABLE IF NOT EXISTS webinar_waiting_list (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER UNIQUE,
+                username TEXT,
+                full_name TEXT,
+                phone TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
         ''')
 
         _safe_add_columns(conn, "users", [
@@ -110,7 +137,14 @@ def init_db():
             ("protocol_remind_step", "INTEGER DEFAULT 0"),
             ("buy_reminder_step", "INTEGER DEFAULT 0"),
             ("silence_triggered", "INTEGER DEFAULT 0"),
-            ("last_active", "DATETIME"),             ("razbor_upsell_7000_step", "INTEGER DEFAULT 0"),
+            ("last_active", "DATETIME"),
+            ("razbor_upsell_7000_step", "INTEGER DEFAULT 0"),
+            # [НОВОЕ] аналитика этапов
+            ("funnel_stage", "TEXT DEFAULT 'start'"),
+            ("funnel_stage_updated", "DATETIME"),
+            # [НОВОЕ] расширенная сегментация
+            ("nosogubki_selected", "INTEGER DEFAULT 0"),
+            ("ustalost_selected", "INTEGER DEFAULT 0"),
         ])
 
         conn.execute(
@@ -167,7 +201,6 @@ def get_all_users():
 
 
 def get_users_by_tag(tag: str):
-    """Получить пользователей по тегу ветки"""
     with get_conn() as conn:
         return conn.execute('SELECT * FROM users WHERE tag = ? ORDER BY id DESC', (tag,)).fetchall()
 
@@ -190,6 +223,53 @@ def get_users_for_reminders():
 def set_reminder_step(tg_id: int, field: str, step: int):
     with get_conn() as conn:
         conn.execute(f'UPDATE users SET {field} = ? WHERE tg_id = ?', (step, tg_id))
+
+
+# ══════════════════════════════════════════════════════════════
+#  [НОВОЕ] АНАЛИТИКА ЭТАПОВ ВОРОНКИ
+# ══════════════════════════════════════════════════════════════
+def update_funnel_stage(tg_id: int, stage: str):
+    """Обновить текущий этап воронки для пользователя."""
+    with get_conn() as conn:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute(
+            'UPDATE users SET funnel_stage = ?, funnel_stage_updated = ? WHERE tg_id = ?',
+            (stage, now, tg_id)
+        )
+
+
+def get_funnel_analytics() -> dict:
+    """
+    Возвращает количество пользователей на каждом этапе воронки.
+    Используется в команде /stats для администратора.
+    """
+    stages = [
+        "start",
+        "problem_chosen",
+        "video_shown",
+        "prelude_shown",
+        "razbor_pay_clicked",
+        "razbor_paid",
+        "protocol_pay_clicked",
+        "protocol_paid",
+        "course_clicked",
+        "course_paid",
+        "webinar_registered",
+        "webinar_attended",
+    ]
+    with get_conn() as conn:
+        result = {}
+        for stage in stages:
+            cnt = conn.execute(
+                'SELECT COUNT(*) FROM users WHERE funnel_stage = ?', (stage,)
+            ).fetchone()[0]
+            result[stage] = cnt
+        # Также считаем «потери» — зашли, но ни разу не нажали ничего
+        silent = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE funnel_stage = 'start' AND join_date < datetime('now', '-1 hour')"
+        ).fetchone()[0]
+        result["silent_after_start"] = silent
+    return result
 
 
 # ══════════════════════════════════════════════════════════════
@@ -395,6 +475,34 @@ def set_last_warmup_sent(tg_id: int, day: int):
 
 
 # ══════════════════════════════════════════════════════════════
+#  [НОВОЕ] СПИСОК ОЖИДАНИЯ ВЕБИНАРА
+# ══════════════════════════════════════════════════════════════
+def add_to_webinar_waiting_list(tg_id: int, username: str = None, full_name: str = None, phone: str = None):
+    """Добавить пользователя в постоянный список ожидания вебинара."""
+    with get_conn() as conn:
+        conn.execute('''
+            INSERT INTO webinar_waiting_list (tg_id, username, full_name, phone)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(tg_id) DO UPDATE SET
+                username = COALESCE(excluded.username, webinar_waiting_list.username),
+                full_name = COALESCE(excluded.full_name, webinar_waiting_list.full_name),
+                phone = COALESCE(excluded.phone, webinar_waiting_list.phone)
+        ''', (tg_id, username, full_name, phone))
+
+
+def get_webinar_waiting_list():
+    """Получить всех из списка ожидания вебинара."""
+    with get_conn() as conn:
+        return conn.execute('SELECT * FROM webinar_waiting_list ORDER BY id ASC').fetchall()
+
+
+def is_in_webinar_waiting_list(tg_id: int) -> bool:
+    with get_conn() as conn:
+        row = conn.execute('SELECT id FROM webinar_waiting_list WHERE tg_id = ?', (tg_id,)).fetchone()
+        return row is not None
+
+
+# ══════════════════════════════════════════════════════════════
 #  ВЕБИНАР SETTINGS
 # ══════════════════════════════════════════════════════════════
 def get_webinar():
@@ -449,6 +557,29 @@ def reset_webinar_registrations():
 
 
 # ══════════════════════════════════════════════════════════════
+#  [НОВОЕ] ЗАЯВКИ НА ОБУЧЕНИЕ / ПРАКТИКИ
+# ══════════════════════════════════════════════════════════════
+def save_enrollment_request(tg_id: int, username: str, full_name: str, phone: str, direction: str):
+    """Сохранить заявку на обучение или практику."""
+    with get_conn() as conn:
+        conn.execute('''
+            INSERT INTO enrollment_requests (tg_id, username, full_name, phone, direction)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (tg_id, username, full_name, phone, direction))
+
+
+def get_enrollment_requests(direction: str = None):
+    """Получить все заявки (или по направлению)."""
+    with get_conn() as conn:
+        if direction:
+            return conn.execute(
+                'SELECT * FROM enrollment_requests WHERE direction = ? ORDER BY created_at DESC',
+                (direction,)
+            ).fetchall()
+        return conn.execute('SELECT * FROM enrollment_requests ORDER BY created_at DESC').fetchall()
+
+
+# ══════════════════════════════════════════════════════════════
 #  СТАТИСТИКА
 # ══════════════════════════════════════════════════════════════
 def get_stats() -> dict:
@@ -463,16 +594,22 @@ def get_stats() -> dict:
         vip_paid = conn.execute('SELECT COUNT(*) FROM users WHERE vip_paid = 1').fetchone()[0]
         diag_paid = conn.execute('SELECT COUNT(*) FROM users WHERE diag_paid = 1').fetchone()[0]
         by_tag = {row['tag']: row['cnt'] for row in conn.execute('SELECT tag, COUNT(*) as cnt FROM users GROUP BY tag').fetchall()}
-    return dict(total=total, paid=paid, webinar_registered=web_reg, webinar_attended=web_att,
-                clicked_buy=clicked_buy, razbor_paid=razbor_paid, protocol_paid=protocol_paid,
-                vip_paid=vip_paid, diag_paid=diag_paid, by_tag=by_tag)
+        # [НОВОЕ] Список ожидания вебинара
+        waiting_list_cnt = conn.execute('SELECT COUNT(*) FROM webinar_waiting_list').fetchone()[0]
+        # [НОВОЕ] Заявки на обучение
+        enrollment_cnt = conn.execute('SELECT COUNT(*) FROM enrollment_requests').fetchone()[0]
+    return dict(
+        total=total, paid=paid, webinar_registered=web_reg, webinar_attended=web_att,
+        clicked_buy=clicked_buy, razbor_paid=razbor_paid, protocol_paid=protocol_paid,
+        vip_paid=vip_paid, diag_paid=diag_paid, by_tag=by_tag,
+        waiting_list_cnt=waiting_list_cnt, enrollment_cnt=enrollment_cnt
+    )
 
 
 # ══════════════════════════════════════════════════════════════
 #  МОЛЧУНЫ (72Ч)
 # ══════════════════════════════════════════════════════════════
 def get_silent_72h_users():
-    """Пользователи, которые зарегистрировались 72+ ч назад, ничего не купили и ещё не получали триггер."""
     with get_conn() as conn:
         return conn.execute('''
             SELECT * FROM users
@@ -534,10 +671,13 @@ def clear_all_data():
         conn.execute('DROP TABLE IF EXISTS webinar_settings')
         conn.execute('DROP TABLE IF EXISTS funnel_content')
         conn.execute('DROP TABLE IF EXISTS bot_settings')
+        conn.execute('DROP TABLE IF EXISTS enrollment_requests')
+        conn.execute('DROP TABLE IF EXISTS webinar_waiting_list')
     init_db()
 
+
 # ══════════════════════════════════════════════════════════════
-#  МЕДИА FILE_ID (авто-загрузка из папки media/)
+#  МЕДИА FILE_ID
 # ══════════════════════════════════════════════════════════════
 def init_media_table():
     with get_conn() as conn:
@@ -551,7 +691,6 @@ def init_media_table():
 
 
 def get_media_file_id(filename: str) -> str:
-    """Вернуть сохранённый file_id по имени файла. Пустая строка если нет."""
     try:
         with get_conn() as conn:
             row = conn.execute(
@@ -563,7 +702,6 @@ def get_media_file_id(filename: str) -> str:
 
 
 def set_media_file_id(filename: str, file_id: str):
-    """Сохранить или обновить file_id для файла."""
     with get_conn() as conn:
         conn.execute('''
             INSERT INTO media_file_ids (filename, file_id)
@@ -572,10 +710,7 @@ def set_media_file_id(filename: str, file_id: str):
                                                 uploaded_at = CURRENT_TIMESTAMP
         ''', (filename, file_id))
 
+
 def stop_all_reminders_for_product(tg_id: int, product_prefix: str):
-    """
-    Пример: product_prefix = 'razbor' обнулит дожимы по разбору, 
-    чтобы они не мешали дожимам по курсу.
-    """
     with get_conn() as conn:
         conn.execute(f'UPDATE users SET {product_prefix}_remind_step = 10 WHERE tg_id = ?', (tg_id,))

@@ -20,6 +20,7 @@ def kb_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎓 Понять систему (вебинар)", callback_data="branch:webinar")],
     ])
 
+
 def kb_protocol_pay(tg_id: int) -> InlineKeyboardMarkup:
     """Оплата мини-протокола 7000₽"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -37,25 +38,31 @@ def kb_persistent_main() -> ReplyKeyboardMarkup:
 
 
 # ════════════════════════════════════════════════════════════
-#  ПРОБЛЕМЫ И ТЕГИ
+#  ПРОБЛЕМЫ И ТЕГИ (расширенный список)
 # ════════════════════════════════════════════════════════════
 
 def kb_problems() -> InlineKeyboardMarkup:
+    """Выбор проблемы — расширенный список (6 вариантов)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💧 Отёки", callback_data="problem:otoki")],
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="problem:asimmetriya")],
         [InlineKeyboardButton(text="📐 Овал лица", callback_data="problem:oval")],
-        [InlineKeyboardButton(text="💥 Боль", callback_data="problem:bol")],
+        [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="problem:bol")],
+        # [НОВОЕ] Два новых варианта
+        [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="problem:nosogubki")],
+        [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="problem:ustalost")],
     ])
 
 
 def kb_problem_selection() -> InlineKeyboardMarkup:
-    """Альтернативный выбор проблем"""
+    """Альтернативный выбор проблем (тег-версия) — тоже расширен"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💧 Отёки", callback_data="tag:otoki")],
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="tag:asimmetriya")],
         [InlineKeyboardButton(text="📐 Овал лица", callback_data="tag:oval")],
-        [InlineKeyboardButton(text="💥 Боль", callback_data="tag:bol")],
+        [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="tag:bol")],
+        [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="tag:nosogubki")],
+        [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="tag:ustalost")],
     ])
 
 
@@ -141,6 +148,12 @@ def kb_after_razbor_paid() -> InlineKeyboardMarkup:
     ])
 
 
+def kb_channel() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📖 Полезное в канале", url=CHANNEL_URL)],
+    ])
+
+
 # ════════════════════════════════════════════════════════════
 #  ВЕБИНАРЫ
 # ════════════════════════════════════════════════════════════
@@ -175,6 +188,34 @@ def kb_post_webinar() -> InlineKeyboardMarkup:
 
 
 # ════════════════════════════════════════════════════════════
+#  [НОВОЕ] СПИСОК ОЖИДАНИЯ ВЕБИНАРА
+# ════════════════════════════════════════════════════════════
+
+def kb_webinar_waiting_list() -> InlineKeyboardMarkup:
+    """Попасть в список ожидания вебинара"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔔 Хочу попасть на вебинар", callback_data="webinar:waiting_list")],
+    ])
+
+
+# ════════════════════════════════════════════════════════════
+#  [НОВОЕ] ЗАПИСЬ НА ОБУЧЕНИЕ И ПРАКТИКИ
+# ════════════════════════════════════════════════════════════
+
+def kb_enrollment_menu() -> InlineKeyboardMarkup:
+    """Меню выбора направления для записи"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧘 Самоостеопатия для себя (онлайн)", callback_data="enroll:self_online")],
+        [InlineKeyboardButton(text="🧘 Самоостеопатия для себя (офлайн)", callback_data="enroll:self_offline")],
+        [InlineKeyboardButton(text="🎓 OsteoFace PRO — для специалистов (онлайн)", callback_data="enroll:pro_online")],
+        [InlineKeyboardButton(text="🎓 OsteoFace PRO — для специалистов (офлайн)", callback_data="enroll:pro_offline")],
+        [InlineKeyboardButton(text="🏆 Индивидуальное сопровождение", callback_data="enroll:vip_individual")],
+        [InlineKeyboardButton(text="🤝 Групповая практика / тренировка", callback_data="enroll:group_practice")],
+        [InlineKeyboardButton(text="📍 Офлайн-встреча / оздоровительное занятие", callback_data="enroll:offline_event")],
+    ])
+
+
+# ════════════════════════════════════════════════════════════
 #  КУРСЫ И ОБУЧЕНИЕ
 # ════════════════════════════════════════════════════════════
 
@@ -194,97 +235,56 @@ def kb_day0_info(tag: str = "") -> InlineKeyboardMarkup:
 def kb_courses_links() -> InlineKeyboardMarkup:
     """Ссылки на курсы"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌸 ОстеоФейс — для себя", callback_data="buy_request:self")],
-        [InlineKeyboardButton(text="🎓 ОстеоФейс ПРО — обучение", callback_data="buy_request:pro")],
-        [InlineKeyboardButton(text="🏆 VIP-сопровождение 30 дней", callback_data="vip_info")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
+        [InlineKeyboardButton(text="🌸 ОстеоФейс (для себя)", url=PAY_URL_SELF)],
+        [InlineKeyboardButton(text="🎓 ОстеоФейс ПРО (для специалистов)", url=PAY_URL_PRO)],
     ])
 
 
 def kb_course_landing() -> InlineKeyboardMarkup:
-    """Лендинг курса"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Перейти на сайт", url="https://monecle.com/lg/osteoface/osteoface_1/")],
+        [InlineKeyboardButton(text="🎓 Записаться на курс", callback_data="buy_request:self")],
     ])
 
 
-def kb_channel() -> InlineKeyboardMarkup:
-    """Ссылка на канал"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Перейти в канал ➡️", url=CHANNEL_URL)],
-    ])
-
-
-# ════════════════════════════════════════════════════════════
-#  ПРОГРЕВ ПО ДНЯМ
-# ════════════════════════════════════════════════════════════
-
-def kb_warmup_day1(tag: str = "") -> InlineKeyboardMarkup:
-    if tag == "обучение":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📖 Полезное в канале", url=CHANNEL_URL)],
-        ])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📸 Получить разбор лица", callback_data="razbor")],
-        [InlineKeyboardButton(text="📖 Полезное в канале", url=CHANNEL_URL)],
-    ])
-
-
-def kb_warmup_day2(tag: str = "") -> InlineKeyboardMarkup:
-    if tag == "обучение":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Подробнее о курсе", url=PAY_URL_PRO)],
-        ])
+def kb_warmup_day1(tag: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 Подробнее о курсах", callback_data="courses_info")],
-        [InlineKeyboardButton(text="📖 Полезное в канале", url=CHANNEL_URL)],
     ])
 
 
-def kb_warmup_day3(tag: str = "") -> InlineKeyboardMarkup:
-    if tag == "обучение":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
-            [InlineKeyboardButton(text="📚 Подробнее о курсе", url=PAY_URL_PRO)],
-        ])
+def kb_warmup_day2(tag: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📚 Подробнее о курсах", callback_data="courses_info")],
+        [InlineKeyboardButton(text="💎 Получить персональный разбор", callback_data="razbor_details")],
+    ])
+
+
+def kb_warmup_day3(tag: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Хочу такой же результат", callback_data="razbor_details")],
     ])
 
 
 def kb_warmup_day4_self(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Записаться на курс ОстеоФейс",
-                              callback_data="buy_request:self")],
-        [InlineKeyboardButton(text="🏆 VIP-сопровождение",
-                              callback_data="vip_info")],
+        [InlineKeyboardButton(text="🎓 Узнать про курс ОстеоФейс", callback_data="course_landing_info")],
     ])
 
 
 def kb_warmup_day4_pro(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Записаться на ОстеоФейс ПРО",
-                              callback_data="buy_request:pro")],
-        [InlineKeyboardButton(text="🏆 VIP-сопровождение",
-                              callback_data="vip_info")],
+        [InlineKeyboardButton(text="🎓 Узнать про ОстеоФейс ПРО", url=PAY_URL_PRO)],
     ])
 
 
 def kb_warmup_day5_buy_self(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Записаться на курс ОстеоФейс",
-                              callback_data="buy_request:self")],
-        [InlineKeyboardButton(text="🏆 VIP — 30 дней с мастером",
-                              callback_data="vip_info")],
+        [InlineKeyboardButton(text="🌸 Присоединиться к ОстеоФейс", url=f"{PAY_URL_SELF}?tg_id={tg_id}")],
     ])
 
 
 def kb_warmup_day5_buy_pro(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 Записаться на ОстеоФейс ПРО",
-                              callback_data="buy_request:pro")],
-        [InlineKeyboardButton(text="🏆 VIP — 30 дней с мастером",
-                              callback_data="vip_info")],
+        [InlineKeyboardButton(text="🎓 Присоединиться к ОстеоФейс ПРО", url=f"{PAY_URL_PRO}?tg_id={tg_id}")],
     ])
 
 
@@ -331,9 +331,13 @@ def kb_admin_menu(is_test: bool = False) -> InlineKeyboardMarkup:
     mode = "🔴 Режим: ТЕСТ" if is_test else "🟢 Режим: БОЕВОЙ"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+        # [НОВОЕ] Аналитика воронки
+        [InlineKeyboardButton(text="🔍 Аналитика воронки", callback_data="admin:funnel_stats")],
         [InlineKeyboardButton(text="🗓 Управление вебинарами", callback_data="admin:webinar_menu")],
         [InlineKeyboardButton(text="📤 Рассылка", callback_data="admin:broadcast_menu")],
         [InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin:users:0")],
+        # [НОВОЕ] Заявки на обучение
+        [InlineKeyboardButton(text="📋 Заявки на обучение", callback_data="admin:enrollments")],
         [InlineKeyboardButton(text="✏️ Изменить шаблоны", callback_data="admin:edit_funnel_menu")],
         [InlineKeyboardButton(text="📝 Шаблон разбора лица", callback_data="admin:edit_razbor_template")],
         [InlineKeyboardButton(text=mode, callback_data="admin:toggle_test")],
@@ -345,6 +349,8 @@ def kb_admin_webinar_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗓 Назначить вебинар", callback_data="admin:set_webinar")],
         [InlineKeyboardButton(text="ℹ️ Инфо о вебинаре", callback_data="admin:webinar_info")],
+        # [НОВОЕ] Рассылка по списку ожидания
+        [InlineKeyboardButton(text="🔔 Разослать по листу ожидания", callback_data="admin:broadcast_waiting_list")],
         [InlineKeyboardButton(text="❌ Отменить вебинар", callback_data="admin:cancel_webinar")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin:panel")],
     ])
@@ -358,6 +364,9 @@ def kb_admin_broadcast_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="broadcast:асимметрия")],
         [InlineKeyboardButton(text="📐 Овал", callback_data="broadcast:овал")],
         [InlineKeyboardButton(text="💥 Боль", callback_data="broadcast:боль")],
+        # [НОВОЕ] Новые сегменты
+        [InlineKeyboardButton(text="😣 Носогубки", callback_data="broadcast:носогубки")],
+        [InlineKeyboardButton(text="😴 Усталость лица", callback_data="broadcast:усталость")],
         [InlineKeyboardButton(text="✨ Подтяжка", callback_data="broadcast:подтяжка")],
         [InlineKeyboardButton(text="💰 Обучение (ПРО)", callback_data="broadcast:обучение")],
         [InlineKeyboardButton(text="🎯 Зарег. на вебинар", callback_data="broadcast:webinar_reg")],
@@ -366,7 +375,7 @@ def kb_admin_broadcast_menu() -> InlineKeyboardMarkup:
 
 
 def kb_course_pay_direct(tg_id: int) -> InlineKeyboardMarkup:
-    """Прямая кнопка оплаты курса 49 000₽ (из апселла после 7000₽)"""
+    """Прямая кнопка оплаты курса 49 000₽"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎓 Хочу на курс OsteoFace — 49 000 ₽",
                               url=f"{PAY_URL_SELF}?tg_id={tg_id}")],
@@ -420,7 +429,6 @@ def kb_users_list(users: list, page: int, total: int,
             callback_data=f"user_info:{u['tg_id']}:{page}"
         )])
 
-    # Навигация
     nav = []
     if page > 0:
         nav.append(InlineKeyboardButton(text="◀️ Назад",
