@@ -26,11 +26,3 @@ DB_PATH = "bot.db"
 TIMEZONE = "Europe/Moscow"
 VIDEO_OTEKI = "BAACAgIAAxkBAANpacfc08HSMyAp0y4B_cWGtF484sYAAjuaAAIBF0FK6rKJS1SbKT46BA"
 VIDEO_PODTYAZHKA = "BAACAgIAAxkBAANwacfd2zWlJdhItqC2DkA5upCkc-EAAkWaAAIBF0FKkPdpCdvvzQI6BA"
-
-# Маппинг для сегментации (4 ветки)
-TAG_MAP = {
-    "otoki": "отёки",
-    "asimmetriya": "асимметрия",
-    "oval": "овал",
-    "bol": "боль"
-}

@@ -1,3 +1,4 @@
+# database.py (исправленный)
 import sqlite3
 import logging
 from datetime import datetime
@@ -73,7 +74,6 @@ def init_db():
                 silence_triggered INTEGER DEFAULT 0,
                 last_active DATETIME,
                 razbor_upsell_7000_step INTEGER DEFAULT 0,
-                -- [НОВОЕ] Аналитика по этапам воронки
                 funnel_stage TEXT DEFAULT "start",
                 funnel_stage_updated DATETIME
             );
@@ -106,7 +106,6 @@ def init_db():
                 value TEXT DEFAULT ""
             );
 
-            -- [НОВОЕ] Заявки на обучение и практики
             CREATE TABLE IF NOT EXISTS enrollment_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id INTEGER,
@@ -117,9 +116,6 @@ def init_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
-            -- [НОВОЕ] Список ожидания вебинара (отдельно от webinar_registered)
-            -- webinar_registered в таблице users используется для ТЕКУЩЕГО вебинара.
-            -- waiting_list — это постоянный список желающих попасть на ЛЮБОЙ вебинар.
             CREATE TABLE IF NOT EXISTS webinar_waiting_list (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id INTEGER UNIQUE,
@@ -139,12 +135,8 @@ def init_db():
             ("silence_triggered", "INTEGER DEFAULT 0"),
             ("last_active", "DATETIME"),
             ("razbor_upsell_7000_step", "INTEGER DEFAULT 0"),
-            # [НОВОЕ] аналитика этапов
             ("funnel_stage", "TEXT DEFAULT 'start'"),
-            ("funnel_stage_updated", "DATETIME"),
-            # [НОВОЕ] расширенная сегментация
-            ("nosogubki_selected", "INTEGER DEFAULT 0"),
-            ("ustalost_selected", "INTEGER DEFAULT 0"),
+            ("funnel_stage_updated", "DATETIME")
         ])
 
         conn.execute(
@@ -464,9 +456,10 @@ def get_post_webinar_users():
         return conn.execute('SELECT * FROM users WHERE is_paid = 0 AND post_webinar_active = 1 AND funnel_stopped = 0').fetchall()
 
 
+# Функция get_warmup_users — ИСПРАВЛЕНА: добавлены теги "асимметрия" и "боль"
 def get_warmup_users():
     with get_conn() as conn:
-        return conn.execute('SELECT * FROM users WHERE is_paid = 0 AND funnel_stopped = 0 AND tag IN ("отёки","подтяжка","обучение")').fetchall()
+        return conn.execute('SELECT * FROM users WHERE is_paid = 0 AND funnel_stopped = 0 AND tag IN ("отёки","подтяжка","обучение","носогубки","усталость","асимметрия","боль")').fetchall()
 
 
 def set_last_warmup_sent(tg_id: int, day: int):
@@ -594,9 +587,7 @@ def get_stats() -> dict:
         vip_paid = conn.execute('SELECT COUNT(*) FROM users WHERE vip_paid = 1').fetchone()[0]
         diag_paid = conn.execute('SELECT COUNT(*) FROM users WHERE diag_paid = 1').fetchone()[0]
         by_tag = {row['tag']: row['cnt'] for row in conn.execute('SELECT tag, COUNT(*) as cnt FROM users GROUP BY tag').fetchall()}
-        # [НОВОЕ] Список ожидания вебинара
         waiting_list_cnt = conn.execute('SELECT COUNT(*) FROM webinar_waiting_list').fetchone()[0]
-        # [НОВОЕ] Заявки на обучение
         enrollment_cnt = conn.execute('SELECT COUNT(*) FROM enrollment_requests').fetchone()[0]
     return dict(
         total=total, paid=paid, webinar_registered=web_reg, webinar_attended=web_att,
@@ -714,3 +705,11 @@ def set_media_file_id(filename: str, file_id: str):
 def stop_all_reminders_for_product(tg_id: int, product_prefix: str):
     with get_conn() as conn:
         conn.execute(f'UPDATE users SET {product_prefix}_remind_step = 10 WHERE tg_id = ?', (tg_id,))
+
+def register_user(tg_id: int, username: str = None, full_name: str = None):
+    with get_conn() as conn:
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute('''
+            INSERT OR IGNORE INTO users (tg_id, username, full_name, join_date, funnel_stage, funnel_stage_updated)
+            VALUES (?, ?, ?, ?, 'start', ?)
+        ''', (tg_id, username, full_name, now, now))

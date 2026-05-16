@@ -1,3 +1,4 @@
+# bot.py (исправленный и полный)
 import asyncio
 import logging
 import random
@@ -152,32 +153,11 @@ async def cmd_cleardb(message: Message, state: FSMContext):
 
 
 # ══════════════════════════════════════════════════════════════
-#  ДЕНЬ 0 — отправка приветствия ветки
-# ══════════════════════════════════════════════════════════════
-async def send_day0(target: Message, tag: str):
-    data = DAY0[tag]
-    video_id = (data.get("video") or "").strip() if isinstance(data, dict) else ""
-    text = data.get("text", "") if isinstance(data, dict) else str(data)
-
-    if video_id:
-        caption = VIDEO_CAPTIONS.get(tag, "")
-        try:
-            await bot.send_video(
-                chat_id=target.chat.id, video=video_id,
-                caption=caption
-            )
-            await asyncio.sleep(2)
-        except Exception as e:
-            logger.error(f"Day0 video: {e}")
-
-    await target.answer(text, reply_markup=kb_day0_info(tag), parse_mode="HTML")
-
-
-# ══════════════════════════════════════════════════════════════
 #  /start
 # ══════════════════════════════════════════════════════════════
 @router.message(CommandStart())
 async def cmd_start(message, state: FSMContext):
+    db.register_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
     await state.clear()
     await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
     await message.answer(WELCOME, reply_markup=kb_main_menu())
@@ -193,8 +173,7 @@ async def cb_branch(callback: CallbackQuery):
     if branch == "razbor":
         await callback.message.answer(PROBLEM_ASK, reply_markup=kb_problems())
     elif branch == "webinar":
-        # Всегда показываем вебинарный оффер — без упоминания "не провожу"
-        await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_register())
+        await callback.message.answer(WEBINAR_INVITE, reply_markup=kb_webinar_waiting_list())
     await callback.answer()
 
 
@@ -553,8 +532,38 @@ async def receive_question(message: Message, state: FSMContext):
 
 
 # ──────────────────────────────────────────────────────────────
-#  ВЕБИНАР
+#  ОТВЕТ АДМИНА ПОЛЬЗОВАТЕЛЮ (через бота)
 # ──────────────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("admin_reply:"))
+async def cb_admin_reply(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.message.chat.id, callback.from_user.id):
+        return
+    target_id = int(callback.data.split(":")[1])
+    await state.update_data(target_id=target_id)
+    await state.set_state(AdminReplyState.waiting_for_reply)
+    await callback.message.answer("✍️ Напишите ответ пользователю:")
+    await callback.answer()
+
+
+@router.message(AdminReplyState.waiting_for_reply)
+async def admin_send_reply(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data.get("target_id")
+    if not target_id:
+        await state.clear()
+        return
+
+    try:
+        await bot.send_message(target_id, f"📩 <b>Ответ:</b>\n\n{message.text}", parse_mode="HTML")
+        await message.answer("✅ Ответ отправлен!")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка отправки: {e}")
+    await state.clear()
+
+
+# ══════════════════════════════════════════════════════════════
+#  ВЕБИНАР
+# ══════════════════════════════════════════════════════════════
 @router.callback_query(F.data == "webinar:register")
 async def cb_webinar_register(callback: CallbackQuery, state: FSMContext):
     tg_id = callback.from_user.id
@@ -1603,13 +1612,14 @@ async def bcast_wl_confirm(callback: CallbackQuery, state: FSMContext):
     sent = 0
     for u in users:
         try:
-            await bot.send_message(u["tg_id"], text)
+            # Добавляем кнопку регистрации на вебинар
+            await bot.send_message(u["tg_id"], text, reply_markup=kb_webinar_register(), parse_mode="HTML")
             sent += 1
             await asyncio.sleep(0.05)
         except:
             pass
 
-    await callback.message.answer(f"✅ Разослано {sent} пользователям из листа ожидания.")
+    await callback.message.answer(f"✅ Разослано {sent} пользователям из листа ожидания.\nТеперь они могут нажать кнопку регистрации и попадут в цикл напоминаний.")
     await callback.answer()
 
 
@@ -1725,6 +1735,10 @@ async def delete_pin_notification(message: Message):
     except Exception:
         pass
 
+@router.callback_query(F.data == "show_enrollment")
+async def cb_show_enrollment(callback: CallbackQuery):
+    await callback.message.answer(ENROLLMENT_MENU_TEXT, reply_markup=kb_enrollment_menu(), parse_mode="HTML")
+    await callback.answer()
 
 if __name__ == "__main__":
     asyncio.run(main())

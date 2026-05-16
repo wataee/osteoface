@@ -1,3 +1,4 @@
+# keyboards.py (исправленный)
 from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     ReplyKeyboardMarkup, KeyboardButton,
@@ -14,10 +15,10 @@ from config import (
 # ════════════════════════════════════════════════════════════
 
 def kb_main_menu() -> InlineKeyboardMarkup:
-    """Главное меню бота"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔥 Быстро убрать проблему (разбор)", callback_data="fast_solve")],
         [InlineKeyboardButton(text="🎓 Понять систему (вебинар)", callback_data="branch:webinar")],
+        [InlineKeyboardButton(text="📚 Запись на обучение и практики", callback_data="show_enrollment")],
     ])
 
 
@@ -48,21 +49,8 @@ def kb_problems() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="problem:asimmetriya")],
         [InlineKeyboardButton(text="📐 Овал лица", callback_data="problem:oval")],
         [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="problem:bol")],
-        # [НОВОЕ] Два новых варианта
         [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="problem:nosogubki")],
         [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="problem:ustalost")],
-    ])
-
-
-def kb_problem_selection() -> InlineKeyboardMarkup:
-    """Альтернативный выбор проблем (тег-версия) — тоже расширен"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💧 Отёки", callback_data="tag:otoki")],
-        [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="tag:asimmetriya")],
-        [InlineKeyboardButton(text="📐 Овал лица", callback_data="tag:oval")],
-        [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="tag:bol")],
-        [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="tag:nosogubki")],
-        [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="tag:ustalost")],
     ])
 
 
@@ -136,15 +124,6 @@ def kb_payment_success() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 Перейти к курсу", url=COURSE_URL)],
         [InlineKeyboardButton(text="💬 Вступить в чат учеников", url=STUDENTS_CHAT_URL)],
-    ])
-
-
-def kb_after_razbor_paid() -> InlineKeyboardMarkup:
-    """После оплаты разбора — предлагаем VIP"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏆 Узнать про VIP-сопровождение",
-                              callback_data="vip_info")],
-        [InlineKeyboardButton(text="📖 Наш канал", url=CHANNEL_URL)],
     ])
 
 
@@ -331,12 +310,10 @@ def kb_admin_menu(is_test: bool = False) -> InlineKeyboardMarkup:
     mode = "🔴 Режим: ТЕСТ" if is_test else "🟢 Режим: БОЕВОЙ"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
-        # [НОВОЕ] Аналитика воронки
         [InlineKeyboardButton(text="🔍 Аналитика воронки", callback_data="admin:funnel_stats")],
         [InlineKeyboardButton(text="🗓 Управление вебинарами", callback_data="admin:webinar_menu")],
         [InlineKeyboardButton(text="📤 Рассылка", callback_data="admin:broadcast_menu")],
         [InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin:users:0")],
-        # [НОВОЕ] Заявки на обучение
         [InlineKeyboardButton(text="📋 Заявки на обучение", callback_data="admin:enrollments")],
         [InlineKeyboardButton(text="✏️ Изменить шаблоны", callback_data="admin:edit_funnel_menu")],
         [InlineKeyboardButton(text="📝 Шаблон разбора лица", callback_data="admin:edit_razbor_template")],
@@ -349,7 +326,6 @@ def kb_admin_webinar_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗓 Назначить вебинар", callback_data="admin:set_webinar")],
         [InlineKeyboardButton(text="ℹ️ Инфо о вебинаре", callback_data="admin:webinar_info")],
-        # [НОВОЕ] Рассылка по списку ожидания
         [InlineKeyboardButton(text="🔔 Разослать по листу ожидания", callback_data="admin:broadcast_waiting_list")],
         [InlineKeyboardButton(text="❌ Отменить вебинар", callback_data="admin:cancel_webinar")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin:panel")],
@@ -357,17 +333,15 @@ def kb_admin_webinar_menu() -> InlineKeyboardMarkup:
 
 
 def kb_admin_broadcast_menu() -> InlineKeyboardMarkup:
-    """Меню рассылок"""
+    """Меню рассылок (исправлено: овал -> подтяжка)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Всем", callback_data="broadcast:all")],
         [InlineKeyboardButton(text="💧 Отёки", callback_data="broadcast:отёки")],
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="broadcast:асимметрия")],
-        [InlineKeyboardButton(text="📐 Овал", callback_data="broadcast:овал")],
+        [InlineKeyboardButton(text="📐 Овал (подтяжка)", callback_data="broadcast:подтяжка")],
         [InlineKeyboardButton(text="💥 Боль", callback_data="broadcast:боль")],
-        # [НОВОЕ] Новые сегменты
         [InlineKeyboardButton(text="😣 Носогубки", callback_data="broadcast:носогубки")],
         [InlineKeyboardButton(text="😴 Усталость лица", callback_data="broadcast:усталость")],
-        [InlineKeyboardButton(text="✨ Подтяжка", callback_data="broadcast:подтяжка")],
         [InlineKeyboardButton(text="💰 Обучение (ПРО)", callback_data="broadcast:обучение")],
         [InlineKeyboardButton(text="🎯 Зарег. на вебинар", callback_data="broadcast:webinar_reg")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin:panel")],
