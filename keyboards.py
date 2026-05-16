@@ -43,7 +43,7 @@ def kb_persistent_main() -> ReplyKeyboardMarkup:
 # ════════════════════════════════════════════════════════════
 
 def kb_problems() -> InlineKeyboardMarkup:
-    """Выбор проблемы — расширенный список (6 вариантов)"""
+    """Выбор проблемы — расширенный список (7 вариантов)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💧 Отёки", callback_data="problem:otoki")],
         [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="problem:asimmetriya")],
@@ -51,6 +51,7 @@ def kb_problems() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="problem:bol")],
         [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="problem:nosogubki")],
         [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="problem:ustalost")],
+        [InlineKeyboardButton(text="🎓 Обучение", callback_data="problem:obuchenie")],
     ])
 
 
