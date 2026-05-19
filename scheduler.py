@@ -43,7 +43,13 @@ def _warmup_keyboard(day: int, tag: str, tg_id: int,
     if day == 3:
         return kb_warmup_day3(tag)
     if day == 4:
-        return kb_warmup_day4_pro(tg_id) if tag == TAG_PRO else kb_warmup_day4_self(tg_id)
+        if tag == TAG_PRO:
+            return kb_warmup_day4_pro(tg_id)
+        else:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            return InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="💎 Получить персональный разбор", callback_data="razbor_details")
+            ]])
     if day == 5:
         if has_webinar:
             return kb_webinar_register()
