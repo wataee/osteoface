@@ -156,9 +156,63 @@ async def cmd_cleardb(message: Message, state: FSMContext):
 #  /start
 # ══════════════════════════════════════════════════════════════
 @router.message(CommandStart())
-async def cmd_start(message, state: FSMContext):
-    db.register_user(message.from_user.id, message.from_user.username, message.from_user.full_name)
+async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
+    tg_id = message.from_user.id
+    db.register_user(tg_id, message.from_user.username, message.from_user.full_name)
     await state.clear()
+
+    param = (command.args or "").strip().lower()
+
+    # ── Ветка ManyChat: ?start=oteki ──────────────────────────
+    if param == "oteki":
+        db.upsert_user(tg_id, "отёки", message.from_user.username, message.from_user.full_name)
+        db.update_funnel_stage(tg_id, "problem_chosen")
+        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
+        await message.answer(PROBLEM_REPLIES.get("otoki", ""))
+        await asyncio.sleep(1)
+        await message.answer_video(video=VIDEO_OTEKI)
+        db.update_funnel_stage(tg_id, "video_shown")
+        await asyncio.sleep(1)
+        await message.answer(
+            RAZBOR_OFFER_PRELUDE,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
+            ]])
+        )
+        db.update_funnel_stage(tg_id, "prelude_shown")
+        return
+
+    # ── Ветка ManyChat: ?start=podtyazhka ────────────────────
+    if param == "podtyazhka":
+        db.upsert_user(tg_id, "подтяжка", message.from_user.username, message.from_user.full_name)
+        db.update_funnel_stage(tg_id, "problem_chosen")
+        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
+        await message.answer(PROBLEM_REPLIES.get("oval", ""))
+        await asyncio.sleep(1)
+        await message.answer_video(video=VIDEO_PODTYAZHKA)
+        db.update_funnel_stage(tg_id, "video_shown")
+        await asyncio.sleep(1)
+        await message.answer(
+            RAZBOR_OFFER_PRELUDE,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
+            ]])
+        )
+        db.update_funnel_stage(tg_id, "prelude_shown")
+        return
+
+    # ── Ветка ManyChat: ?start=obuchenie ─────────────────────
+    if param == "obuchenie":
+        db.upsert_user(tg_id, "обучение", message.from_user.username, message.from_user.full_name)
+        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎓 Узнать про ОстеоФейс ПРО", url=PAY_URL_PRO)],
+            [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
+        ])
+        await message.answer(OBUCHENIE_KEYWORD_MSG, reply_markup=kb, parse_mode="HTML")
+        return
+
+    # ── Обычный /start без параметра ─────────────────────────
     await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
     await message.answer(WELCOME, reply_markup=kb_main_menu())
 
