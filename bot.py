@@ -242,8 +242,7 @@ async def cb_problem(callback: CallbackQuery):
         "oval": "подтяжка", 
         "bol": "боль",
         "nosogubki": "носогубки",
-        "ustalost": "усталость",
-        "obuchenie": "обучение"
+        "ustalost": "усталость"
     }
     tag = tags_mapping.get(problem_key, "отёки")
     
@@ -253,17 +252,13 @@ async def cb_problem(callback: CallbackQuery):
     await callback.message.answer(PROBLEM_REPLIES.get(problem_key, ""))
     await asyncio.sleep(1)
     
-    if problem_key == "obuchenie":
-        await callback.message.answer("Обучение — это мощный шаг. Выберите подходящее направление:", reply_markup=kb_enrollment_menu())
-        db.update_funnel_stage(tg_id, "course_clicked")
-    else:
-        video = VIDEO_OTEKI if problem_key in ("otoki", "ustalost") else VIDEO_PODTYAZHKA
-        await callback.message.answer_video(video=video)
-        db.update_funnel_stage(tg_id, "video_shown")
-        await asyncio.sleep(1)
-
-        await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")]]))
-        db.update_funnel_stage(tg_id, "prelude_shown")
+    video = VIDEO_OTEKI if problem_key in ("otoki", "ustalost") else VIDEO_PODTYAZHKA
+    await callback.message.answer_video(video=video)
+    db.update_funnel_stage(tg_id, "video_shown")
+    await asyncio.sleep(1)
+    
+    await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")]]))
+    db.update_funnel_stage(tg_id, "prelude_shown")
     await callback.answer()
 
 @router.callback_query(F.data == "razbor_details")
