@@ -167,16 +167,13 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if param == "oteki":
         db.upsert_user(tg_id, "отёки", message.from_user.username, message.from_user.full_name)
         db.update_funnel_stage(tg_id, "problem_chosen")
-        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
         await message.answer(PROBLEM_REPLIES.get("otoki", ""))
-        await asyncio.sleep(1)
-        await message.answer_video(video=VIDEO_OTEKI)
-        db.update_funnel_stage(tg_id, "video_shown")
-        await asyncio.sleep(1)
+        await bot.send_chat_action(tg_id, "typing")
+        await asyncio.sleep(4)
         await message.answer(
             RAZBOR_OFFER_PRELUDE,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
+                InlineKeyboardButton(text="записаться на разбор (3000 ₽)", callback_data="razbor_details")
             ]])
         )
         db.update_funnel_stage(tg_id, "prelude_shown")
@@ -186,16 +183,13 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     if param == "podtyazhka":
         db.upsert_user(tg_id, "подтяжка", message.from_user.username, message.from_user.full_name)
         db.update_funnel_stage(tg_id, "problem_chosen")
-        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
         await message.answer(PROBLEM_REPLIES.get("oval", ""))
-        await asyncio.sleep(1)
-        await message.answer_video(video=VIDEO_PODTYAZHKA)
-        db.update_funnel_stage(tg_id, "video_shown")
-        await asyncio.sleep(1)
+        await bot.send_chat_action(tg_id, "typing")
+        await asyncio.sleep(4)
         await message.answer(
             RAZBOR_OFFER_PRELUDE,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")
+                InlineKeyboardButton(text="записаться на разбор (3000 ₽)", callback_data="razbor_details")
             ]])
         )
         db.update_funnel_stage(tg_id, "prelude_shown")
@@ -204,7 +198,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     # ── Ветка ManyChat: ?start=obuchenie ─────────────────────
     if param == "obuchenie":
         db.upsert_user(tg_id, "обучение", message.from_user.username, message.from_user.full_name)
-        await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🎓 Узнать про ОстеоФейс ПРО", url=PAY_URL_PRO)],
             [InlineKeyboardButton(text="❓ Задать вопрос", callback_data="ask_question")],
@@ -213,7 +206,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         return
 
     # ── Обычный /start без параметра ─────────────────────────
-    await message.answer("👇 Выберите действие:", reply_markup=kb_persistent_main())
     await message.answer(WELCOME, reply_markup=kb_main_menu())
 
 @router.message(F.text == "🔙 Главное меню")
@@ -250,14 +242,10 @@ async def cb_problem(callback: CallbackQuery):
     db.update_funnel_stage(tg_id, "problem_chosen")
     
     await callback.message.answer(PROBLEM_REPLIES.get(problem_key, ""))
-    await asyncio.sleep(1)
+    await bot.send_chat_action(tg_id, "typing")
+    await asyncio.sleep(4)
     
-    video = VIDEO_OTEKI if problem_key in ("otoki", "ustalost") else VIDEO_PODTYAZHKA
-    await callback.message.answer_video(video=video)
-    db.update_funnel_stage(tg_id, "video_shown")
-    await asyncio.sleep(1)
-    
-    await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Персональный разбор — 3000 ₽", callback_data="razbor_details")]]))
+    await callback.message.answer(RAZBOR_OFFER_PRELUDE, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="записаться на разбор (3000 ₽)", callback_data="razbor_details")]]))
     db.update_funnel_stage(tg_id, "prelude_shown")
     await callback.answer()
 
@@ -439,18 +427,9 @@ async def receive_razbor_photo(message: Message, state: FSMContext):
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_2)
     await asyncio.sleep(1)
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💎 Персональный разбор — 3 000 ₽", callback_data="buy_razbor_personal")
+        InlineKeyboardButton(text="записаться на разбор (3000 ₽)", callback_data="buy_razbor_personal")
     ]])
     await bot.send_message(tg_id, RAZBOR_PHOTO_REPLY_3, reply_markup=kb)
-    # Апсэлл расширенного разбора 7000
-    await asyncio.sleep(1)
-    kb_upsell = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🚀 Расширенный разбор — 7 000 ₽",
-            callback_data="pay_protocol_click"
-        )
-    ]])
-    await bot.send_message(tg_id, UPSELL_7000_IMMEDIATE, reply_markup=kb_upsell)
     db.mark_razbor_auto_replied(tg_id)
     asyncio.create_task(_fast_followup_razbor(tg_id))
 

@@ -566,127 +566,33 @@ async def job_global_72h_trigger(bot: Bot):
 #  ОСНОВНОЙ ДОЖИМ (6ч/24ч/48ч для разбора, 1ч/24ч для протокола, 1д/2д/3д для курса)
 # ══════════════════════════════════════════════════════════════
 async def job_reminders(bot: Bot, is_test: bool = False):
-    """Дожимы по этапам: разбор 3к, протокол 7к, курс 49к"""
+    """Мягкий дожим для тех, кто оставил неоплаченной заявку на разбор (3000 ₽)"""
     users = db.get_users_for_reminders()
     now = datetime.now()
 
     for user in users:
         tg_id = user["tg_id"]
 
-        # 1. Дожим разбора (3 000 ₽) — 6ч, 24ч, 48ч
+        # Напоминание по разбору (однократное через 24 часа)
         if user["razbor_pay_click_time"] and not user["razbor_paid"]:
             try:
                 click_time = datetime.strptime(user["razbor_pay_click_time"], '%Y-%m-%d %H:%M:%S')
                 diff = (now - click_time).total_seconds()
                 if is_test:
                     diff_minutes = diff / 60
-                    cond_6h = 6 <= diff_minutes < 24
-                    cond_24h = 24 <= diff_minutes < 48
-                    cond_48h = 48 <= diff_minutes
+                    cond_24h = 24 <= diff_minutes
                 else:
                     diff_hours = diff / 3600
-                    cond_6h = 6 <= diff_hours < 24
-                    cond_24h = 24 <= diff_hours < 48
-                    cond_48h = 48 <= diff_hours
+                    cond_24h = 24 <= diff_hours
 
                 step = user.get("razbor_remind_step", 0)
 
-                if step == 0 and cond_6h:
-                    await bot.send_message(tg_id, RAZBOR_REMIND_6H, reply_markup=kb_razbor_personal_pay(tg_id))
+                if step == 0 and cond_24h:
+                    from content import RAZBOR_ABANDONED_CART
+                    await bot.send_message(tg_id, RAZBOR_ABANDONED_CART)
                     db.set_reminder_step(tg_id, "razbor_remind_step", 1)
-                elif step == 1 and cond_24h:
-                    await bot.send_message(tg_id, RAZBOR_REMIND_24H, reply_markup=kb_razbor_personal_pay(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_remind_step", 2)
-                elif step == 2 and cond_48h:
-                    # Финальное усиление боли
-                    await bot.send_message(tg_id, "⏳ Твоё лицо продолжает меняться каждый день. Гравитация не берет выходных. Жду тебя на разборе, чтобы остановить этот процесс 👇", 
-                                        reply_markup=kb_razbor_personal_pay(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_remind_step", 3)
             except Exception as e:
                 logger.error(f"[razbor_reminder] user {tg_id}: {e}")
-
-        # 2. Дожим мини-протокола (7 000 ₽) — 1ч, 24ч
-        if user["protocol_pay_click_time"] and not user["protocol_paid"]:
-            try:
-                click_time = datetime.strptime(user["protocol_pay_click_time"], '%Y-%m-%d %H:%M:%S')
-                diff = (now - click_time).total_seconds()
-                if is_test:
-                    diff_minutes = diff / 60
-                    cond_1h = 1 <= diff_minutes < 24
-                    cond_24h = 24 <= diff_minutes < 48
-                    cond_48h = 48 <= diff_minutes
-                else:
-                    diff_hours = diff / 3600
-                    cond_1h = 1 <= diff_hours < 24
-                    cond_24h = 24 <= diff_hours < 48
-                    cond_48h = 48 <= diff_hours
-
-                step = user.get("protocol_remind_step", 0)
-
-                if step == 0 and cond_1h:
-                    await bot.send_message(tg_id, PROTOCOL_REMIND_1H, reply_markup=kb_pay_protocol(tg_id))
-                    db.set_reminder_step(tg_id, "protocol_remind_step", 1)
-                elif step == 1 and cond_24h:
-                    await bot.send_message(tg_id, PROTOCOL_REMIND_24H, reply_markup=kb_pay_protocol(tg_id))
-                    db.set_reminder_step(tg_id, "protocol_remind_step", 2)
-                elif step == 2 and cond_48h:
-                    await bot.send_message(tg_id, PROTOCOL_REMIND_48H, reply_markup=kb_pay_protocol(tg_id))
-                    db.set_reminder_step(tg_id, "protocol_remind_step", 3)
-            except Exception as e:
-                logger.error(f"[protocol_reminder] user {tg_id}: {e}")
-
-        # 3. Дожим курса (49 000 ₽) — 1д, 2д, 3д
-        if user["click_buy_time"] and not user["is_paid"]:
-            try:
-                click_time = datetime.strptime(user["click_buy_time"], '%Y-%m-%d %H:%M:%S')
-                diff = (now - click_time).total_seconds()
-                if is_test:
-                    diff_minutes = diff / 60
-                    cond_1d = 1 <= diff_minutes < 2
-                    cond_2d = 2 <= diff_minutes < 3
-                    cond_3d = 3 <= diff_minutes
-                else:
-                    diff_days = diff / 86400
-                    cond_1d = 1 <= diff_days < 2
-                    cond_2d = 2 <= diff_days < 3
-                    cond_3d = 3 <= diff_days
-
-                step = user.get("buy_reminder_step", 0)
-
-                if step == 0 and cond_1d:
-                    await bot.send_message(tg_id, BUY_REMIND_1D, reply_markup=kb_pay(tg_id))
-                    db.set_reminder_step(tg_id, "buy_reminder_step", 1)
-                elif step == 1 and cond_2d:
-                    await bot.send_message(tg_id, BUY_REMIND_2D, reply_markup=kb_pay(tg_id))
-                    db.set_reminder_step(tg_id, "buy_reminder_step", 2)
-                elif step == 2 and cond_3d:
-                    await bot.send_message(tg_id, BUY_REMIND_3D, reply_markup=kb_pay(tg_id))
-                    db.set_reminder_step(tg_id, "buy_reminder_step", 3)
-            except Exception as e:
-                logger.error(f"[course_reminder] user {tg_id}: {e}")
-                # 4. Дожим на 7000 ₽ после оплаты разбора (через 1 и 3 дня)
-        if user["razbor_paid"] and not user["protocol_paid"] and user["paid_date"]:
-            try:
-                paid_date = datetime.strptime(user["paid_date"], '%Y-%m-%d %H:%M:%S')
-                diff = (now - paid_date).total_seconds()
-                if is_test:
-                    diff_minutes = diff / 60
-                    cond_1d = 1440 <= diff_minutes < 2880   # 1 день в минутах
-                    cond_3d = 4320 <= diff_minutes < 5760   # 3 дня
-                else:
-                    diff_days = diff / 86400
-                    cond_1d = 1 <= diff_days < 2
-                    cond_3d = 3 <= diff_days < 4
-
-                step = user.get("razbor_upsell_7000_step", 0)
-                if step == 0 and cond_1d:
-                    await bot.send_message(tg_id, UPSELL_7000, reply_markup=kb_pay_protocol(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_upsell_7000_step", 1)
-                elif step == 1 and cond_3d:
-                    await bot.send_message(tg_id, UPSELL_7000 + "\n\n⏳ Это последнее напоминание. Возможность усилить результат ещё открыта.", reply_markup=kb_pay_protocol(tg_id))
-                    db.set_reminder_step(tg_id, "razbor_upsell_7000_step", 2)
-            except Exception as e:
-                logger.error(f"[razbor_upsell_7000] user {tg_id}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -698,25 +604,13 @@ def setup_scheduler(bot: Bot, is_test: bool = False):
 
     if is_test:
         # Тестовый режим — быстрые интервалы
-        scheduler.add_job(job_daily_warmup, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_daily_post_webinar, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_webinar_reminders, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_vip_reminders, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_diag_reminders, "interval", seconds=10, args=[bot, True])
         scheduler.add_job(job_check_payments, "interval", seconds=10, args=[bot])
         scheduler.add_job(job_reminders, "interval", seconds=10, args=[bot, True])
-        scheduler.add_job(job_global_72h_trigger, "interval", seconds=30, args=[bot])
         logger.info("Scheduler: TEST MODE")
     else:
         # Боевой режим — реальные интервалы
-        scheduler.add_job(job_daily_warmup, "interval", hours=1, args=[bot, False])
-        scheduler.add_job(job_daily_post_webinar, "interval", hours=1, args=[bot, False])
-        scheduler.add_job(job_webinar_reminders, "interval", minutes=10, args=[bot, False])
-        scheduler.add_job(job_vip_reminders, "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_diag_reminders, "interval", minutes=30, args=[bot, False])
         scheduler.add_job(job_check_payments, "interval", minutes=2, args=[bot])
         scheduler.add_job(job_reminders, "interval", minutes=30, args=[bot, False])
-        scheduler.add_job(job_global_72h_trigger, "interval", hours=6, args=[bot])
         logger.info("Scheduler: PRODUCTION MODE")
 
     if not scheduler.running:
