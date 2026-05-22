@@ -16,9 +16,11 @@ from config import (
 
 def kb_main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 Быстро убрать проблему (разбор)", callback_data="fast_solve")],
-        [InlineKeyboardButton(text="🎓 Понять систему (вебинар)", callback_data="branch:webinar")],
-        [InlineKeyboardButton(text="📚 Запись на обучение и практики", callback_data="show_enrollment")],
+        [InlineKeyboardButton(text="отёки", callback_data="problem:otoki")],
+        [InlineKeyboardButton(text="овал", callback_data="problem:oval")],
+        [InlineKeyboardButton(text="асимметрия", callback_data="problem:asimmetriya")],
+        [InlineKeyboardButton(text="шея", callback_data="problem:bol")],
+        [InlineKeyboardButton(text="усталость", callback_data="problem:ustalost")],
     ])
 
 
@@ -43,15 +45,13 @@ def kb_persistent_main() -> ReplyKeyboardMarkup:
 # ════════════════════════════════════════════════════════════
 
 def kb_problems() -> InlineKeyboardMarkup:
-    """Выбор проблемы — расширенный список (7 вариантов)"""
+    """Выбор проблемы"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💧 Отёки", callback_data="problem:otoki")],
-        [InlineKeyboardButton(text="⚖️ Асимметрия", callback_data="problem:asimmetriya")],
-        [InlineKeyboardButton(text="📐 Овал лица", callback_data="problem:oval")],
-        [InlineKeyboardButton(text="💥 Боль / напряжение", callback_data="problem:bol")],
-        [InlineKeyboardButton(text="😣 Носогубные складки", callback_data="problem:nosogubki")],
-        [InlineKeyboardButton(text="😴 Усталый вид лица", callback_data="problem:ustalost")],
-        [InlineKeyboardButton(text="🎓 Обучение", callback_data="problem:obuchenie")],
+        [InlineKeyboardButton(text="отёки", callback_data="problem:otoki")],
+        [InlineKeyboardButton(text="овал", callback_data="problem:oval")],
+        [InlineKeyboardButton(text="асимметрия", callback_data="problem:asimmetriya")],
+        [InlineKeyboardButton(text="шея", callback_data="problem:bol")],
+        [InlineKeyboardButton(text="усталость", callback_data="problem:ustalost")],
     ])
 
 
@@ -99,7 +99,7 @@ def kb_pay_protocol(tg_id: int) -> InlineKeyboardMarkup:
 def kb_razbor_personal_pay(tg_id: int) -> InlineKeyboardMarkup:
     """Кнопка покупки персонального разбора за 3000₽"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 Получить персональный разбор — 3 000 ₽",
+        [InlineKeyboardButton(text="записаться на разбор (3000 ₽)",
                               callback_data="buy_razbor_personal")],
     ])
 
